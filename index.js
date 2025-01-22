@@ -1,21 +1,23 @@
 import express from "express";
-import pg from "pg";
+import {Pool} from "pg";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
-import bodyParser from "body-parser";
 import cors from "cors";
 import dotenv from "dotenv";
 dotenv.config();
 
-const db = new pg.Client({
+const db = new Pool({
     user: process.env.DB_USER,
     host: process.env.DB_HOST,
     database: process.env.DB_NAME,
     password: process.env.DB_PASSWORD,
     port: process.env.DB_PORT,
+    max: 100,
+    idleTimeoutMillis: 10000,
+    connectionTimeoutMillis: 5000,
     ssl: {
         rejectUnauthorized: false,
-      },
+    },
 });
 
 
@@ -38,8 +40,6 @@ const corsOptions = {
 
 app.use(express.static("public"));
 app.use(express.json());
-app.use(bodyParser.urlencoded({extended:true}));
-app.use(bodyParser.json());
 app.use(cors(corsOptions));
 
 
@@ -49,8 +49,8 @@ app.get("/", (req, res) => {
 
 app.get("/student_details/:id", async (req, res) => {
     const id = req.params.id;
-    const query = `SELECT * FROM users WHERE id = ${id}`;
-    const result = await db.query(query);
+    const query = `SELECT * FROM users WHERE id = $1`;
+    const result = await db.query(query, [id]);
 
     if(result.rows.length === 0){
         res.status(404).json({message:"User not found"});
@@ -61,13 +61,16 @@ app.get("/student_details/:id", async (req, res) => {
     }
 });
 
-
-
-
 app.get("/student_enrolled_courses/:id", async (req, res) => {
     const id = req.params.id;
-    const query = `SELECT c.name AS course_name, u.name AS teacher_name FROM Courses c INNER JOIN Teachers t ON t.course_id = c.id INNER JOIN Users u ON u.id = t.user_id WHERE c.id IN (SELECT e.course_id FROM Enrollments e WHERE e.student_id = ${id});`;
-    const result = await db.query(query);
+    const query = `
+        SELECT c.name AS course_name, u.name AS teacher_name 
+        FROM Courses c 
+        INNER JOIN Teachers t ON t.course_id = c.id 
+        INNER JOIN Users u ON u.id = t.user_id 
+        WHERE c.id IN (SELECT e.course_id FROM Enrollments e WHERE e.student_id = $1);
+    `;
+    const result = await db.query(query, [id]);
     if(result.rows.length === 0){
         res.status(404).json({message:"User not found"});
     }else{
@@ -200,21 +203,23 @@ app.get('/search', async (req, res) => {
 
 app.get('/get-user-data', authenticateToken, async (req, res) => {
     const userId = req.user.id;
-    const query = `SELECT name,email FROM Users WHERE id = ${userId}`;
-    const query2 = `SELECT 
-                    c.id AS course_id,
-                    c.name AS course_name,
-                    t.name AS teacher_name
-                FROM 
-                    enrollments e
-                INNER JOIN 
-                    courses c ON e.course_id = c.id
-                INNER JOIN 
-                    users t ON e.teacher_id = t.id
-                where e.student_id = ${userId}`;
-    const result = await db.query(query);
-    const result2 = await db.query(query2);
-    res.json({name:result.rows[0].name, email:result.rows[0].email ,courses:result2.rows});
+    const query = `SELECT name, email FROM Users WHERE id = $1`;
+    const query2 = `
+        SELECT 
+            c.id AS course_id,
+            c.name AS course_name,
+            t.name AS teacher_name
+        FROM 
+            enrollments e
+        INNER JOIN 
+            courses c ON e.course_id = c.id
+        INNER JOIN 
+            users t ON e.teacher_id = t.id
+        WHERE e.student_id = $1
+    `;
+    const result = await db.query(query, [userId]);
+    const result2 = await db.query(query2, [userId]);
+    res.json({name: result.rows[0].name, email: result.rows[0].email, courses: result2.rows});
 });
 
 
@@ -234,21 +239,17 @@ app.post('/change-password', authenticateToken, async (req, res) => {
     const { oldPassword, newPassword } = req.body;
     const userId = req.user.id;
 
-    // Get current password hash
     const userResult = await db.query('SELECT password_hash FROM Users WHERE id = $1', [userId]);
     const currentHash = userResult.rows[0].password_hash;
 
-    // Verify old password
     const isValidPassword = await bcrypt.compare(oldPassword, currentHash);
     if (!isValidPassword) {
         return res.status(401).json({ message: 'Current password is incorrect' });
     }
 
-    // Hash new password
     const newHash = await bcrypt.hash(newPassword, 10);
-    // Update password
     const query = `UPDATE Users SET password_hash = $1 WHERE id = $2`;
-    const result = await db.query(query, [newHash, userId]);
+    await db.query(query, [newHash, userId]);
     res.status(200).json({message:"Password changed successfully"});
 });
 
@@ -280,19 +281,15 @@ app.post("/login", async (req, res) => {
         const user = result.rows[0];
 
         if (!user) {
-            console.log("Invalid username or password");
             return res.status(401).json({ message: 'Invalid username or password' });
         }
 
-        // implement hashing
         const isValidPassword = await bcrypt.compare(password, user.password_hash);
 
         if (!isValidPassword) {
-            console.log("Invalid username or password");
             return res.status(401).json({ message: 'Invalid username or password' });
         }
 
-        // Generate JWT
         const accessToken = jwt.sign(
             { id: user.id, name: user.name, role: user.role },
             ACCESS_SECRET_KEY,                                      
@@ -307,7 +304,7 @@ app.post("/login", async (req, res) => {
 
         res.cookie('refreshToken', refreshToken, { httpOnly: true, secure: true });
 
-        res.json({ accessToken , role:user.role});
+        res.json({ accessToken, role: user.role });
     } catch (error) {
         console.error('Error during login:', error);
         res.status(500).send('Server error');
