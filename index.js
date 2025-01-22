@@ -1,10 +1,11 @@
 import express from "express";
-import {Pool} from "pg";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import cors from "cors";
 import dotenv from "dotenv";
 dotenv.config();
+
+const {Pool} = require('pg');
 
 const db = new Pool({
     user: process.env.DB_USER,
