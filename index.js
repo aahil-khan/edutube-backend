@@ -3,9 +3,10 @@ import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import cors from "cors";
 import dotenv from "dotenv";
+import pg from 'pg';
 dotenv.config();
 
-const pg = await import('pg');
+
 const { Pool } = pg;
 
 const db = new Pool({
