@@ -5,7 +5,8 @@ import cors from "cors";
 import dotenv from "dotenv";
 dotenv.config();
 
-const {Pool} = require('pg');
+const pg = await import('pg');
+const { Pool } = pg;
 
 const db = new Pool({
     user: process.env.DB_USER,
