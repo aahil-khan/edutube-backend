@@ -53,6 +53,7 @@ const corsOptions = {
   maxAge: 600
 };
 
+
 app.use(express.static("public"));
 app.use(express.json());
 app.use(cors(corsOptions));
@@ -261,23 +262,23 @@ app.get('/get-user-data', authenticateToken, async (req, res) => {
         }
 
         const query = `SELECT name, email FROM Users WHERE id = $1`;
-        const query2 = `
-            SELECT 
-                c.id AS course_id,
-                c.name AS course_name,
-                t.name AS teacher_name
-            FROM 
-                enrollments e
-            INNER JOIN 
-                courses c ON e.course_id = c.id
-            INNER JOIN 
-                users t ON e.teacher_id = t.id
-            WHERE e.student_id = $1
-        `;
+        // const query2 = `
+        //     SELECT 
+        //         c.id AS course_id,
+        //         c.name AS course_name,
+        //         t.name AS teacher_name
+        //     FROM 
+        //         enrollments e
+        //     INNER JOIN 
+        //         courses c ON e.course_id = c.id
+        //     INNER JOIN 
+        //         users t ON e.teacher_id = t.id
+        //     WHERE e.student_id = $1
+        // `;
         const result = await db.query(query, [userId]);
-        const result2 = await db.query(query2, [userId]);
+        // const result2 = await db.query(query2, [userId]);
 
-        const userData = { name: result.rows[0].name, email: result.rows[0].email, courses: result2.rows };
+        const userData = { name: result.rows[0].name, email: result.rows[0].email };
         await redisClient.set(cacheKey, JSON.stringify(userData), { EX: 3600 });
         res.json(userData);
     } catch (error) {
@@ -359,10 +360,14 @@ app.get('/verify-auth', authenticateToken, (req, res) => {
 
 
 app.post("/login", async (req, res) => {
+    console.log('Headers:', req.headers);
+    console.log('Body:', req.body);
+
     const { email, password } = req.body;
 
-    console.log(email)
-    console.log(password)
+    console.log('Email:', email);
+    console.log('Password:', password);
+
 
     try {
         const result = await db.query('SELECT id, email, role, password_hash FROM users WHERE email = $1', [email]);
