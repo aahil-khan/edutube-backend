@@ -4,8 +4,9 @@ import jwt from "jsonwebtoken";
 import cors from "cors";
 import dotenv from "dotenv";
 import pg from 'pg';
-dotenv.config();
+import redis from 'redis';
 
+dotenv.config();
 
 const { Pool } = pg;
 
@@ -23,8 +24,19 @@ const db = new Pool({
     },
 });
 
-
 db.connect();
+
+const redisClient = redis.createClient({
+    url: process.env.REDIS_URL
+});
+
+redisClient.on('error', (err) => {
+    console.error('Redis error:', err);
+});
+
+redisClient.connect().then(() => {
+    console.log('Connected to Redis');
+});
 
 const app = express();
 
@@ -52,40 +64,73 @@ app.get("/", (req, res) => {
 
 app.get("/student_details/:id", async (req, res) => {
     const id = req.params.id;
-    const query = `SELECT * FROM users WHERE id = $1`;
-    const result = await db.query(query, [id]);
+    const cacheKey = `student_details_${id}`;
 
-    if(result.rows.length === 0){
-        res.status(404).json({message:"User not found"});
-    }else if(result.rows[0].role != "student"){
-        res.status(403).json({message:"User is not a student"});
-    }else{
-        res.json(result.rows);
+    try {
+        const cachedData = await redisClient.get(cacheKey);
+        if (cachedData) {
+            return res.json(JSON.parse(cachedData));
+        }
+
+        const query = `SELECT * FROM users WHERE id = $1`;
+        const result = await db.query(query, [id]);
+
+        if (result.rows.length === 0) {
+            res.status(404).json({ message: "User not found" });
+        } else if (result.rows[0].role != "student") {
+            res.status(403).json({ message: "User is not a student" });
+        } else {
+            await redisClient.set(cacheKey, JSON.stringify(result.rows), { EX: 3600 });
+            res.json(result.rows);
+        }
+    } catch (error) {
+        console.error('Error fetching student details:', error);
+        res.status(500).send('Server error');
     }
 });
 
 app.get("/student_enrolled_courses/:id", async (req, res) => {
     const id = req.params.id;
-    const query = `
-        SELECT c.name AS course_name, u.name AS teacher_name 
-        FROM Courses c 
-        INNER JOIN Teachers t ON t.course_id = c.id 
-        INNER JOIN Users u ON u.id = t.user_id 
-        WHERE c.id IN (SELECT e.course_id FROM Enrollments e WHERE e.student_id = $1);
-    `;
-    const result = await db.query(query, [id]);
-    if(result.rows.length === 0){
-        res.status(404).json({message:"User not found"});
-    }else{
-        res.json(result.rows);
+    const cacheKey = `student_enrolled_courses_${id}`;
+
+    try {
+        const cachedData = await redisClient.get(cacheKey);
+        if (cachedData) {
+            return res.json(JSON.parse(cachedData));
+        }
+
+        const query = `
+            SELECT c.name AS course_name, u.name AS teacher_name 
+            FROM Courses c 
+            INNER JOIN Teachers t ON t.course_id = c.id 
+            INNER JOIN Users u ON u.id = t.user_id 
+            WHERE c.id IN (SELECT e.course_id FROM Enrollments e WHERE e.student_id = $1);
+        `;
+        const result = await db.query(query, [id]);
+
+        if (result.rows.length === 0) {
+            res.status(404).json({ message: "User not found" });
+        } else {
+            await redisClient.set(cacheKey, JSON.stringify(result.rows), { EX: 3600 });
+            res.json(result.rows);
+        }
+    } catch (error) {
+        console.error('Error fetching enrolled courses:', error);
+        res.status(500).send('Server error');
     }
 });
 
 //add authentication
 app.get('/search', async (req, res) => {
     const { keyword, type, courseId, teacherId, startDate, endDate } = req.query;
+    const cacheKey = `search_${keyword}_${type}_${courseId}_${teacherId}_${startDate}_${endDate}`;
 
     try {
+        const cachedData = await redisClient.get(cacheKey);
+        if (cachedData) {
+            return res.json(JSON.parse(cachedData));
+        }
+
         let query = '';
         let values = [keyword || null, courseId || null, teacherId || null, startDate || null, endDate || null];
 
@@ -197,6 +242,7 @@ app.get('/search', async (req, res) => {
         }
 
         const result = await db.query(query, values);
+        await redisClient.set(cacheKey, JSON.stringify(result.rows), { EX: 3600 });
         res.json(result.rows);
     } catch (error) {
         console.error('Error executing query', error);
@@ -206,25 +252,39 @@ app.get('/search', async (req, res) => {
 
 app.get('/get-user-data', authenticateToken, async (req, res) => {
     const userId = req.user.id;
-    const query = `SELECT name, email FROM Users WHERE id = $1`;
-    const query2 = `
-        SELECT 
-            c.id AS course_id,
-            c.name AS course_name,
-            t.name AS teacher_name
-        FROM 
-            enrollments e
-        INNER JOIN 
-            courses c ON e.course_id = c.id
-        INNER JOIN 
-            users t ON e.teacher_id = t.id
-        WHERE e.student_id = $1
-    `;
-    const result = await db.query(query, [userId]);
-    const result2 = await db.query(query2, [userId]);
-    res.json({name: result.rows[0].name, email: result.rows[0].email, courses: result2.rows});
-});
+    const cacheKey = `user_data_${userId}`;
 
+    try {
+        const cachedData = await redisClient.get(cacheKey);
+        if (cachedData) {
+            return res.json(JSON.parse(cachedData));
+        }
+
+        const query = `SELECT name, email FROM Users WHERE id = $1`;
+        const query2 = `
+            SELECT 
+                c.id AS course_id,
+                c.name AS course_name,
+                t.name AS teacher_name
+            FROM 
+                enrollments e
+            INNER JOIN 
+                courses c ON e.course_id = c.id
+            INNER JOIN 
+                users t ON e.teacher_id = t.id
+            WHERE e.student_id = $1
+        `;
+        const result = await db.query(query, [userId]);
+        const result2 = await db.query(query2, [userId]);
+
+        const userData = { name: result.rows[0].name, email: result.rows[0].email, courses: result2.rows };
+        await redisClient.set(cacheKey, JSON.stringify(userData), { EX: 3600 });
+        res.json(userData);
+    } catch (error) {
+        console.error('Error fetching user data:', error);
+        res.status(500).send('Server error');
+    }
+});
 
 app.get('/dashboard', authenticateToken, async (req, res) => {
     try {
