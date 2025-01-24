@@ -361,8 +361,11 @@ app.get('/verify-auth', authenticateToken, (req, res) => {
 app.post("/login", async (req, res) => {
     const { email, password } = req.body;
 
+    console.log(email)
+    console.log(password)
+
     try {
-        const result = await db.query('SELECT id, email, role, password_hash FROM Users WHERE email = $1', [email]);
+        const result = await db.query('SELECT id, email, role, password_hash FROM users WHERE email = $1', [email]);
         const user = result.rows[0];
 
         if (!user) {
