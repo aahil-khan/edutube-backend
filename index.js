@@ -123,8 +123,8 @@ app.get("/student_enrolled_courses/:id", async (req, res) => {
 
 //add authentication
 app.get('/search', async (req, res) => {
-    const { keyword, type, courseId, teacherId, startDate, endDate } = req.query;
-    const cacheKey = `search_${keyword}_${type}_${courseId}_${teacherId}_${startDate}_${endDate}`;
+    const { keyword, type, courseId, teacherId } = req.query;
+    const cacheKey = `search_${keyword}_${type}_${courseId}_${teacherId}`;
 
     try {
         const cachedData = await redisClient.get(cacheKey);
@@ -133,7 +133,7 @@ app.get('/search', async (req, res) => {
         }
 
         let query = '';
-        let values = [keyword || null, courseId || null, teacherId || null, startDate || null, endDate || null];
+        let values = [keyword || '', courseId || null, teacherId || null];
 
         // Construct the query dynamically based on the "type" filter
         switch (type) {
@@ -142,13 +142,15 @@ app.get('/search', async (req, res) => {
                     SELECT 
                         C.id AS course_id, 
                         C.name AS course_name, 
-                        'course' AS type
+                        'course' AS type,
+                        ts_rank_cd(to_tsvector(C.name), to_tsquery($1)) AS rank
                     FROM 
                         Courses C
                     WHERE 
-                        ($1::TEXT IS NULL OR C.name ILIKE '%' || $1::TEXT || '%');
+                        ($1::TEXT IS NULL OR to_tsvector(C.name) @@ to_tsquery($1))
+                    ORDER BY rank DESC;
                 `;
-                values = [keyword || null];
+                values = [keyword || ''];
                 break;
 
             case 'lectures':
@@ -159,7 +161,8 @@ app.get('/search', async (req, res) => {
                         C.name AS course_name, 
                         U.name AS teacher_name, 
                         L.created_at, 
-                        'lecture' AS type
+                        'lecture' AS type,
+                        ts_rank_cd(to_tsvector(L.title || ' ' || L.keywords), to_tsquery($1)) AS rank
                     FROM 
                         Lectures L
                     INNER JOIN 
@@ -169,11 +172,10 @@ app.get('/search', async (req, res) => {
                     INNER JOIN 
                         Users U ON T.user_id = U.id
                     WHERE 
-                        ($1::TEXT IS NULL OR L.title ILIKE '%' || $1::TEXT || '%') 
+                        ($1::TEXT IS NULL OR to_tsvector(L.title || ' ' || L.keywords) @@ to_tsquery($1)) 
                         AND ($2::INTEGER IS NULL OR C.id = $2::INTEGER)
                         AND ($3::INTEGER IS NULL OR U.id = $3::INTEGER)
-                        AND ($4::TIMESTAMP IS NULL OR L.created_at >= $4::TIMESTAMP)
-                        AND ($5::TIMESTAMP IS NULL OR L.created_at <= $5::TIMESTAMP);
+                    ORDER BY rank DESC;
                 `;
                 break;
 
@@ -182,15 +184,17 @@ app.get('/search', async (req, res) => {
                     SELECT 
                         U.id AS teacher_id, 
                         U.name AS teacher_name, 
-                        'teacher' AS type
+                        'teacher' AS type,
+                        ts_rank_cd(to_tsvector(U.name), to_tsquery($1)) AS rank
                     FROM 
                         Teachers T
                     INNER JOIN 
                         Users U ON T.user_id = U.id
                     WHERE 
-                        ($1::TEXT IS NULL OR U.name ILIKE '%' || $1::TEXT || '%');
+                        ($1::TEXT IS NULL OR to_tsvector(U.name) @@ to_tsquery($1))
+                    ORDER BY rank DESC;
                 `;
-                values = [keyword || null];
+                values = [keyword || ''];
                 break;
 
             default:
@@ -199,18 +203,20 @@ app.get('/search', async (req, res) => {
                     SELECT 
                         C.id AS id, 
                         C.name AS name, 
-                        'course' AS type
+                        'course' AS type,
+                        ts_rank_cd(to_tsvector(C.name), to_tsquery($1)) AS rank
                     FROM 
                         Courses C
                     WHERE 
-                        ($1::TEXT IS NULL OR C.name ILIKE '%' || $1::TEXT || '%')
+                        ($1::TEXT IS NULL OR to_tsvector(C.name) @@ to_tsquery($1))
                     
                     UNION ALL
                     
                     SELECT 
                         L.id AS id, 
                         L.title AS name, 
-                        'lecture' AS type
+                        'lecture' AS type,
+                        ts_rank_cd(to_tsvector(L.title || ' ' || L.keywords), to_tsquery($1)) AS rank
                     FROM 
                         Lectures L
                     INNER JOIN 
@@ -220,24 +226,24 @@ app.get('/search', async (req, res) => {
                     INNER JOIN 
                         Users U ON T.user_id = U.id
                     WHERE 
-                        ($1::TEXT IS NULL OR L.title ILIKE '%' || $1::TEXT || '%') 
+                        ($1::TEXT IS NULL OR to_tsvector(L.title || ' ' || L.keywords) @@ to_tsquery($1)) 
                         AND ($2::INTEGER IS NULL OR C.id = $2::INTEGER)
                         AND ($3::INTEGER IS NULL OR U.id = $3::INTEGER)
-                        AND ($4::TIMESTAMP IS NULL OR L.created_at >= $4::TIMESTAMP)
-                        AND ($5::TIMESTAMP IS NULL OR L.created_at <= $5::TIMESTAMP)
                     
                     UNION ALL
                     
                     SELECT 
                         U.id AS id, 
                         U.name AS name, 
-                        'teacher' AS type
+                        'teacher' AS type,
+                        ts_rank_cd(to_tsvector(U.name), to_tsquery($1)) AS rank
                     FROM 
                         Teachers T
                     INNER JOIN 
                         Users U ON T.user_id = U.id
                     WHERE 
-                        ($1::TEXT IS NULL OR U.name ILIKE '%' || $1::TEXT || '%');
+                        ($1::TEXT IS NULL OR to_tsvector(U.name) @@ to_tsquery($1))
+                    ORDER BY rank DESC;
                 `;
                 break;
         }
