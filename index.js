@@ -16,9 +16,9 @@ const db = new Pool({
     database: process.env.DB_NAME,
     password: process.env.DB_PASSWORD,
     port: process.env.DB_PORT,
-    max: 100,
+    max: 10,
     idleTimeoutMillis: 10000,
-    connectionTimeoutMillis: 5000,
+    connectionTimeoutMillis: 2000,
     ssl: {
         rejectUnauthorized: false,
     },
@@ -316,6 +316,28 @@ app.post('/change-password', authenticateToken, async (req, res) => {
     res.status(200).json({message:"Password changed successfully"});
 });
 
+app.post('/enroll_course', authenticateToken, async (req, res) => {
+    try{
+        const { studentId, teacherId } = req.body;
+        const query = `INSERT INTO enrollments (student_id, teacher_id) VALUES ($1, $2)`;
+        await db.query(query, [studentId, teacherId]);
+        res.status(200).json({message:"Student enrolled successfully"});
+    }catch(error){
+        res.status(500).send("Error:",error.stack);
+    }
+});
+
+app.delete('/unenroll_course', authenticateToken, async (req, res) => {
+    try{
+        const { studentId, teacherId } = req.body;
+        const query = `DELETE FROM enrollments WHERE student_id = $1 AND teacher_id = $2`;
+        await db.query(query, [studentId, teacherId]);
+        res.status(200).json({message:"Student unenrolled successfully"});
+    }catch(error){
+        res.status(500).send("Error:",error.stack);
+    }
+});
+
 
 //Authentication
 function authenticateToken(req, res, next) {
@@ -344,13 +366,13 @@ app.post("/login", async (req, res) => {
         const user = result.rows[0];
 
         if (!user) {
-            return res.status(401).json({ message: 'Invalid username or password' });
+            return res.status(401).json({ message: 'This username does not exist' });
         }
 
         const isValidPassword = await bcrypt.compare(password, user.password_hash);
 
         if (!isValidPassword) {
-            return res.status(401).json({ message: 'Invalid username or password' });
+            return res.status(401).json({ message: 'Invalid password' });
         }
 
         const accessToken = jwt.sign(
@@ -370,7 +392,7 @@ app.post("/login", async (req, res) => {
         res.json({ accessToken, role: user.role });
     } catch (error) {
         console.error('Error during login:', error);
-        res.status(500).send('Server error');
+        res.status(500).send("Error:",error.stack);
     }
 });
 
