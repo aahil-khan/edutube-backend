@@ -153,7 +153,7 @@ app.get('/search', async (req, res) => {
                     LEFT JOIN 
                         Users U ON T.user_id = U.id
                     WHERE 
-                        ($1::TEXT IS NULL OR to_tsvector(C.name) @@ painto_tsquery($1))
+                        ($1::TEXT IS NULL OR to_tsvector(C.name) @@ plainto_tsquery($1))
                     ORDER BY 
                         rank DESC;
                 `;
@@ -211,23 +211,30 @@ app.get('/search', async (req, res) => {
                     SELECT 
                         C.id AS course_id,
                         C.name AS course_name,
-                        NULL AS teacher_id,
-                        NULL AS teacher_name,
+                        T.id AS teacher_id,
+                        COALESCE(U.name, 'No teacher assigned') AS teacher_name,
+                        NULL AS lecture_id,
+                        NULL AS lecture_title,
                         'course' AS type,
                         ts_rank_cd(to_tsvector(C.name), plainto_tsquery($1)) AS rank
                     FROM 
                         Courses C
+                    LEFT JOIN 
+                        Teachers T ON C.id = T.course_id
+                    LEFT JOIN 
+                        Users U ON T.user_id = U.id
                     WHERE 
                         ($1::TEXT IS NULL OR to_tsvector(C.name) @@ plainto_tsquery($1))
-                    
+
                     UNION ALL
-                    
+
                     SELECT 
-                        L.id AS lecture_id,
-                        L.title AS lecture_title, 
-                        C.name AS course_name, 
+                        NULL AS course_id,
+                        C.name AS course_name,
+                        T.id AS teacher_id,
                         U.name AS teacher_name,
-                        T.id AS teacher_id, 
+                        L.id AS lecture_id,
+                        L.title AS lecture_title,
                         'lecture' AS type,
                         ts_rank_cd(to_tsvector(L.title || ' ' || L.keywords), plainto_tsquery($1)) AS rank
                     FROM 
@@ -239,17 +246,19 @@ app.get('/search', async (req, res) => {
                     INNER JOIN 
                         Users U ON T.user_id = U.id
                     WHERE 
-                        ($1::TEXT IS NULL OR to_tsvector(L.title || ' ' || L.keywords) @@ plainto_tsquery($1)) 
+                        ($1::TEXT IS NULL OR to_tsvector(L.title || ' ' || L.keywords) @@ plainto_tsquery($1))
                         AND ($2::INTEGER IS NULL OR C.id = $2::INTEGER)
                         AND ($3::INTEGER IS NULL OR U.id = $3::INTEGER)
-                    
+
                     UNION ALL
-                    
+
                     SELECT 
                         NULL AS course_id,
                         NULL AS course_name,
                         U.id AS teacher_id,
-                        U.name AS teacher_name, 
+                        U.name AS teacher_name,
+                        NULL AS lecture_id,
+                        NULL AS lecture_title,
                         'teacher' AS type,
                         ts_rank_cd(to_tsvector(U.name), plainto_tsquery($1)) AS rank
                     FROM 
@@ -258,8 +267,10 @@ app.get('/search', async (req, res) => {
                         Users U ON T.user_id = U.id
                     WHERE 
                         ($1::TEXT IS NULL OR to_tsvector(U.name) @@ plainto_tsquery($1))
-                    ORDER BY rank DESC;
-                `;
+
+                    ORDER BY 
+                        rank DESC;
+                    `;
                 values = [keyword || '', courseId || null, teacherId || null];
                 break;
         }
