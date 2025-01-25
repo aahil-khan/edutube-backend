@@ -17,8 +17,8 @@ const db = new Pool({
     password: process.env.DB_PASSWORD,
     port: process.env.DB_PORT,
     max: 10,
-    idleTimeoutMillis: 10000,
-    connectionTimeoutMillis: 2000,
+    // idleTimeoutMillis: 10000,
+    // connectionTimeoutMillis: 2000,
     ssl: {
         rejectUnauthorized: false,
     },
@@ -140,26 +140,34 @@ app.get('/search', async (req, res) => {
             case 'courses':
                 query = `
                     SELECT 
-                        C.id AS course_id, 
-                        C.name AS course_name, 
+                        C.id AS course_id,
+                        C.name AS course_name,
+                        T.id AS teacher_id,
+                        COALESCE(U.name, 'No teacher assigned') AS teacher_name,
                         'course' AS type,
                         ts_rank_cd(to_tsvector(C.name), to_tsquery($1)) AS rank
                     FROM 
                         Courses C
+                    LEFT JOIN 
+                        Teachers T ON C.id = T.course_id
+                    LEFT JOIN 
+                        Users U ON T.user_id = U.id
                     WHERE 
                         ($1::TEXT IS NULL OR to_tsvector(C.name) @@ to_tsquery($1))
-                    ORDER BY rank DESC;
+                    ORDER BY 
+                        rank DESC;
                 `;
                 values = [keyword || ''];
                 break;
-
+        
             case 'lectures':
                 query = `
                     SELECT
-                        L.id AS lecture_id, 
+                        L.id AS lecture_id,
                         L.title AS lecture_title, 
                         C.name AS course_name, 
-                        U.name AS teacher_name, 
+                        U.name AS teacher_name,
+                        T.id AS teacher_id, 
                         L.created_at, 
                         'lecture' AS type,
                         ts_rank_cd(to_tsvector(L.title || ' ' || L.keywords), to_tsquery($1)) AS rank
@@ -178,7 +186,7 @@ app.get('/search', async (req, res) => {
                     ORDER BY rank DESC;
                 `;
                 break;
-
+        
             case 'teachers':
                 query = `
                     SELECT 
@@ -196,13 +204,15 @@ app.get('/search', async (req, res) => {
                 `;
                 values = [keyword || ''];
                 break;
-
+        
             default:
                 // Default: Search across all types
                 query = `
                     SELECT 
-                        C.id AS id, 
-                        C.name AS name, 
+                        C.id AS course_id,
+                        C.name AS course_name,
+                        NULL AS teacher_id,
+                        NULL AS teacher_name,
                         'course' AS type,
                         ts_rank_cd(to_tsvector(C.name), to_tsquery($1)) AS rank
                     FROM 
@@ -213,8 +223,11 @@ app.get('/search', async (req, res) => {
                     UNION ALL
                     
                     SELECT 
-                        L.id AS id, 
-                        L.title AS name, 
+                        L.id AS lecture_id,
+                        L.title AS lecture_title, 
+                        C.name AS course_name, 
+                        U.name AS teacher_name,
+                        T.id AS teacher_id, 
                         'lecture' AS type,
                         ts_rank_cd(to_tsvector(L.title || ' ' || L.keywords), to_tsquery($1)) AS rank
                     FROM 
@@ -233,8 +246,10 @@ app.get('/search', async (req, res) => {
                     UNION ALL
                     
                     SELECT 
-                        U.id AS id, 
-                        U.name AS name, 
+                        NULL AS course_id,
+                        NULL AS course_name,
+                        U.id AS teacher_id,
+                        U.name AS teacher_name, 
                         'teacher' AS type,
                         ts_rank_cd(to_tsvector(U.name), to_tsquery($1)) AS rank
                     FROM 
@@ -245,8 +260,10 @@ app.get('/search', async (req, res) => {
                         ($1::TEXT IS NULL OR to_tsvector(U.name) @@ to_tsquery($1))
                     ORDER BY rank DESC;
                 `;
+                values = [keyword || '', courseId || null, teacherId || null];
                 break;
         }
+        
 
         const result = await db.query(query, values);
         await redisClient.set(cacheKey, JSON.stringify(result.rows), { EX: 3600 });
