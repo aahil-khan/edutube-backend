@@ -127,15 +127,20 @@ app.get('/search', async (req, res) => {
     const cacheKey = `search_${keyword}_${type}_${courseId}_${teacherId}`;
 
     try {
+        // Check for cached results
         const cachedData = await redisClient.get(cacheKey);
         if (cachedData) {
             return res.json(JSON.parse(cachedData));
         }
 
-        let query = '';
-        let values = [keyword || '', courseId || null, teacherId || null];
+        // Sanitize the keyword
+        const sanitizeKeyword = (kw) => (kw || '').replace(/[^\w\s]/g, '').trim();
+        const sanitizedKeyword = sanitizeKeyword(keyword);
 
-        // Construct the query dynamically based on the "type" filter
+        let query = '';
+        let values = [sanitizedKeyword, courseId || null, teacherId || null];
+
+        // Dynamic query construction
         switch (type) {
             case 'courses':
                 query = `
@@ -157,9 +162,9 @@ app.get('/search', async (req, res) => {
                     ORDER BY 
                         rank DESC;
                 `;
-                values = [keyword || ''];
+                values = [sanitizedKeyword];
                 break;
-        
+
             case 'lectures':
                 query = `
                     SELECT
@@ -186,7 +191,7 @@ app.get('/search', async (req, res) => {
                     ORDER BY rank DESC;
                 `;
                 break;
-        
+
             case 'teachers':
                 query = `
                     SELECT 
@@ -202,11 +207,10 @@ app.get('/search', async (req, res) => {
                         ($1::TEXT IS NULL OR to_tsvector(U.name) @@ plainto_tsquery($1))
                     ORDER BY rank DESC;
                 `;
-                values = [keyword || ''];
+                values = [sanitizedKeyword];
                 break;
-        
+
             default:
-                // Default: Search across all types
                 query = `
                     SELECT 
                         C.id AS course_id,
@@ -270,20 +274,23 @@ app.get('/search', async (req, res) => {
 
                     ORDER BY 
                         rank DESC;
-                    `;
-                values = [keyword || '', courseId || null, teacherId || null];
+                `;
+                values = [sanitizedKeyword, courseId || null, teacherId || null];
                 break;
         }
-        
 
         const result = await db.query(query, values);
+
+        // Cache the result
         await redisClient.set(cacheKey, JSON.stringify(result.rows), { EX: 3600 });
+
         res.json(result.rows);
     } catch (error) {
-        console.error('Error executing query', error);
+        console.error('Error executing query:', error.message);
         res.status(500).send('Server error');
     }
 });
+
 
 app.get('/get-user-data', authenticateToken, async (req, res) => {
     const userId = req.user.id;
