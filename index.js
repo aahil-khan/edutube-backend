@@ -170,6 +170,8 @@ app.get('/search', async (req, res) => {
                     SELECT
                         L.id AS lecture_id,
                         L.title AS lecture_title, 
+                        L.chapter_number AS chapter_number,
+                        L.lecture_number AS lecture_number,
                         C.name AS course_name, 
                         U.name AS teacher_name,
                         T.id AS teacher_id, 
@@ -219,6 +221,8 @@ app.get('/search', async (req, res) => {
                         COALESCE(U.name, 'No teacher assigned') AS teacher_name,
                         NULL AS lecture_id,
                         NULL AS lecture_title,
+                        NULL AS chapter_number,
+                        NULL AS lecture_number,
                         'course' AS type,
                         ts_rank_cd(to_tsvector(C.name), plainto_tsquery($1)) AS rank
                     FROM 
@@ -239,6 +243,8 @@ app.get('/search', async (req, res) => {
                         U.name AS teacher_name,
                         L.id AS lecture_id,
                         L.title AS lecture_title,
+                        L.chapter_number AS chapter_number,
+                        L.lecture_number AS lecture_number,
                         'lecture' AS type,
                         ts_rank_cd(to_tsvector(L.title || ' ' || L.keywords), plainto_tsquery($1)) AS rank
                     FROM 
@@ -263,6 +269,8 @@ app.get('/search', async (req, res) => {
                         U.name AS teacher_name,
                         NULL AS lecture_id,
                         NULL AS lecture_title,
+                        NULL AS chapter_number,
+                        NULL as lecture_number,
                         'teacher' AS type,
                         ts_rank_cd(to_tsvector(U.name), plainto_tsquery($1)) AS rank
                     FROM 
