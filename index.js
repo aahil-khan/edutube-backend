@@ -311,23 +311,31 @@ app.get('/get-user-data', authenticateToken, async (req, res) => {
         }
 
         const query = `SELECT name, email FROM Users WHERE id = $1`;
-        // const query2 = `
-        //     SELECT 
-        //         c.id AS course_id,
-        //         c.name AS course_name,
-        //         t.name AS teacher_name
-        //     FROM 
-        //         enrollments e
-        //     INNER JOIN 
-        //         courses c ON e.course_id = c.id
-        //     INNER JOIN 
-        //         users t ON e.teacher_id = t.id
-        //     WHERE e.student_id = $1
-        // `;
+        const query2 = `
+                        SELECT 
+                            e.teacher_id AS teacher_id,
+                            c.name AS course_name,
+                            u.name AS teacher_name
+                            FROM 
+                            enrollments e
+                            INNER JOIN 
+                            teachers t ON e.teacher_id = t.id
+                            INNER JOIN 
+                            courses c ON t.course_id = c.id
+                            INNER JOIN
+                            users u on u.id = t.user_id
+                        WHERE e.student_id = $1;
+        `;
         const result = await db.query(query, [userId]);
-        // const result2 = await db.query(query2, [userId]);
+        const result2 = await db.query(query2, [userId]);
 
-        const userData = { name: result.rows[0].name, email: result.rows[0].email };
+        const enrolledCourses = result2.rows.map(row => ({
+            teacher_id: row.teacher_id,
+            teacher_name: row.teacher_name,
+            course_name: row.course_name
+        }));
+        
+        const userData = { name: result.rows[0].name, email: result.rows[0].email, enrolled_courses: enrolledCourses };
         await redisClient.set(cacheKey, JSON.stringify(userData), { EX: 3600 });
         res.json(userData);
     } catch (error) {
