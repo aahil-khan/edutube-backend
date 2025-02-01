@@ -334,8 +334,9 @@ app.get('/get-user-data', authenticateToken, async (req, res) => {
             teacher_name: row.teacher_name,
             course_name: row.course_name
         }));
-        
+
         const userData = { name: result.rows[0].name, email: result.rows[0].email, enrolled_courses: enrolledCourses };
+        console.log(userData);
         await redisClient.set(cacheKey, JSON.stringify(userData), { EX: 3600 });
         res.json(userData);
     } catch (error) {
@@ -393,6 +394,60 @@ app.delete('/unenroll_course', authenticateToken, async (req, res) => {
         res.status(200).json({message:"Student unenrolled successfully"});
     }catch(error){
         res.status(500).send("Error:",error.stack);
+    }
+});
+
+app.get('/courses/:id', async (req, res) => {
+    const teacherId = parseInt(req.params.id);
+  
+    if (isNaN(teacherId)) {
+      return res.status(400).json({ error: 'Invalid teacher ID' });
+    }
+  
+    try {
+      const query = `
+        SELECT 
+            L.chapter_name,
+            L.chapter_number,
+            L.lecture_number,
+            L.title AS lecture_title,
+            L.youtube_url AS lecture_path
+        FROM 
+            Lectures L
+        WHERE 
+            L.teacher_id = $1
+        ORDER BY 
+            L.chapter_number, L.lecture_number;
+      `;
+  
+      const { rows } = await db.query(query, [teacherId]);
+  
+      // Transform the rows into the nested JSON structure
+      const result = rows.reduce((acc, row) => {
+        let chapter = acc.find(ch => ch.chapter_number === row.chapter_number);
+  
+        if (!chapter) {
+          chapter = {
+            chapter_number: row.chapter_number,
+            chapter_name: row.chapter_name,
+            lectures: [],
+          };
+          acc.push(chapter);
+        }
+  
+        chapter.lectures.push({
+          lecture_number: row.lecture_number,
+          lecture_title: row.lecture_title,
+          lecture_path: row.lecture_path,
+        });
+  
+        return acc;
+      }, []);
+  
+      res.json(result);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Internal Server Error' });
     }
 });
 
