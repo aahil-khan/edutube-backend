@@ -127,174 +127,82 @@ app.get('/search', async (req, res) => {
     const cacheKey = `search_${keyword}_${type}_${courseId}_${teacherId}`;
 
     try {
-        // Check for cached results
         const cachedData = await redisClient.get(cacheKey);
         if (cachedData) {
             return res.json(JSON.parse(cachedData));
         }
 
-        // Sanitize the keyword
-        const sanitizeKeyword = (kw) => (kw || '').replace(/[^\w\s]/g, '').trim();
-        const sanitizedKeyword = sanitizeKeyword(keyword);
+        const sanitizedKeyword = (keyword || '').replace(/[^\w\s]/g, '').trim();
+        if (!sanitizedKeyword) return res.json([]);
 
-        let query = '';
-        let values = [sanitizedKeyword, courseId || null, teacherId || null];
+        let esQuery = {};
 
-        // Dynamic query construction
         switch (type) {
             case 'courses':
-                query = `
-                    SELECT 
-                        C.id AS course_id,
-                        C.name AS course_name,
-                        T.id AS teacher_id,
-                        COALESCE(U.name, 'No teacher assigned') AS teacher_name,
-                        'course' AS type,
-                        ts_rank_cd(to_tsvector(C.name), plainto_tsquery($1)) AS rank
-                    FROM 
-                        Courses C
-                    LEFT JOIN 
-                        Teachers T ON C.id = T.course_id
-                    LEFT JOIN 
-                        Users U ON T.user_id = U.id
-                    WHERE 
-                        ($1::TEXT IS NULL OR to_tsvector(C.name) @@ plainto_tsquery($1))
-                    ORDER BY 
-                        rank DESC;
-                `;
-                values = [sanitizedKeyword];
+                esQuery = {
+                    index: 'courses',
+                    query: {
+                        multi_match: {
+                            query: sanitizedKeyword,
+                            fields: ['name^3', 'course_code^2' ,'description'],
+                            fuzziness: 'AUTO'
+                        }
+                    }
+                };
                 break;
 
             case 'lectures':
-                query = `
-                    SELECT
-                        L.id AS lecture_id,
-                        L.title AS lecture_title, 
-                        L.chapter_number AS chapter_number,
-                        L.lecture_number AS lecture_number,
-                        C.name AS course_name, 
-                        U.name AS teacher_name,
-                        T.id AS teacher_id, 
-                        L.created_at, 
-                        'lecture' AS type,
-                        ts_rank_cd(to_tsvector(L.title || ' ' || L.keywords), plainto_tsquery($1)) AS rank
-                    FROM 
-                        Lectures L
-                    INNER JOIN 
-                        Courses C ON L.course_id = C.id
-                    INNER JOIN 
-                        Teachers T ON L.teacher_id = T.id
-                    INNER JOIN 
-                        Users U ON T.user_id = U.id
-                    WHERE 
-                        ($1::TEXT IS NULL OR to_tsvector(L.title || ' ' || L.keywords) @@ plainto_tsquery($1)) 
-                        AND ($2::INTEGER IS NULL OR C.id = $2::INTEGER)
-                        AND ($3::INTEGER IS NULL OR U.id = $3::INTEGER)
-                    ORDER BY rank DESC;
-                `;
+                esQuery = {
+                    index: 'lectures',
+                    query: {
+                        bool: {
+                            must: [
+                                { multi_match: { query: sanitizedKeyword, fields: ['title^3', 'chapter_name^2', 'keywords'], fuzziness: 'AUTO' } }
+                            ],
+                            filter: [
+                                courseId ? { term: { course_id: courseId } } : {},
+                                teacherId ? { term: { teacher_id: teacherId } } : {}
+                            ].filter(Boolean)
+                        }
+                    }
+                };
                 break;
 
             case 'teachers':
-                query = `
-                    SELECT 
-                        U.id AS teacher_id, 
-                        U.name AS teacher_name, 
-                        'teacher' AS type,
-                        ts_rank_cd(to_tsvector(U.name), plainto_tsquery($1)) AS rank
-                    FROM 
-                        Teachers T
-                    INNER JOIN 
-                        Users U ON T.user_id = U.id
-                    WHERE 
-                        ($1::TEXT IS NULL OR to_tsvector(U.name) @@ plainto_tsquery($1))
-                    ORDER BY rank DESC;
-                `;
-                values = [sanitizedKeyword];
+                esQuery = {
+                    index: 'teachers',
+                    query: {
+                        match: {
+                            name: {
+                                query: sanitizedKeyword,
+                                fuzziness: 'AUTO'
+                            }
+                        }
+                    }
+                };
                 break;
 
             default:
-                query = `
-                    SELECT 
-                        C.id AS course_id,
-                        C.name AS course_name,
-                        T.id AS teacher_id,
-                        COALESCE(U.name, 'No teacher assigned') AS teacher_name,
-                        NULL AS lecture_id,
-                        NULL AS lecture_title,
-                        NULL AS chapter_number,
-                        NULL AS lecture_number,
-                        'course' AS type,
-                        ts_rank_cd(to_tsvector(C.name), plainto_tsquery($1)) AS rank
-                    FROM 
-                        Courses C
-                    LEFT JOIN 
-                        Teachers T ON C.id = T.course_id
-                    LEFT JOIN 
-                        Users U ON T.user_id = U.id
-                    WHERE 
-                        ($1::TEXT IS NULL OR to_tsvector(C.name) @@ plainto_tsquery($1))
-
-                    UNION ALL
-
-                    SELECT 
-                        NULL AS course_id,
-                        C.name AS course_name,
-                        T.id AS teacher_id,
-                        U.name AS teacher_name,
-                        L.id AS lecture_id,
-                        L.title AS lecture_title,
-                        L.chapter_number AS chapter_number,
-                        L.lecture_number AS lecture_number,
-                        'lecture' AS type,
-                        ts_rank_cd(to_tsvector(L.title || ' ' || L.keywords), plainto_tsquery($1)) AS rank
-                    FROM 
-                        Lectures L
-                    INNER JOIN 
-                        Courses C ON L.course_id = C.id
-                    INNER JOIN 
-                        Teachers T ON L.teacher_id = T.id
-                    INNER JOIN 
-                        Users U ON T.user_id = U.id
-                    WHERE 
-                        ($1::TEXT IS NULL OR to_tsvector(L.title || ' ' || L.keywords) @@ plainto_tsquery($1))
-                        AND ($2::INTEGER IS NULL OR C.id = $2::INTEGER)
-                        AND ($3::INTEGER IS NULL OR U.id = $3::INTEGER)
-
-                    UNION ALL
-
-                    SELECT 
-                        NULL AS course_id,
-                        NULL AS course_name,
-                        U.id AS teacher_id,
-                        U.name AS teacher_name,
-                        NULL AS lecture_id,
-                        NULL AS lecture_title,
-                        NULL AS chapter_number,
-                        NULL as lecture_number,
-                        'teacher' AS type,
-                        ts_rank_cd(to_tsvector(U.name), plainto_tsquery($1)) AS rank
-                    FROM 
-                        Teachers T
-                    INNER JOIN 
-                        Users U ON T.user_id = U.id
-                    WHERE 
-                        ($1::TEXT IS NULL OR to_tsvector(U.name) @@ plainto_tsquery($1))
-
-                    ORDER BY 
-                        rank DESC;
-                `;
-                values = [sanitizedKeyword, courseId || null, teacherId || null];
+                esQuery = {
+                    index: ['courses', 'lectures', 'teachers'],
+                    query: {
+                        multi_match: {
+                            query: sanitizedKeyword,
+                            fields: ['name^3', 'title^2', 'keywords']
+                        }
+                    }
+                };
                 break;
         }
 
-        const result = await db.query(query, values);
+        const { hits } = await esClient.search(esQuery);
+        const results = hits.hits.map(hit => hit._source);
 
-        // Cache the result
-        await redisClient.set(cacheKey, JSON.stringify(result.rows), { EX: 3600 });
+        await redisClient.set(cacheKey, JSON.stringify(results), { EX: 3600 });
 
-        res.json(result.rows);
+        res.json(results);
     } catch (error) {
-        console.error('Error executing query:', error.message);
+        console.error('Error executing Elasticsearch query:', error.message);
         res.status(500).send('Server error');
     }
 });
