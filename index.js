@@ -4,7 +4,11 @@ import jwt from "jsonwebtoken";
 import cors from "cors";
 import dotenv from "dotenv";
 import pg from 'pg';
+import { Client } from "@elastic/elasticsearch";
 import redis from 'redis';
+
+
+const esClient = new Client({ node: 'http://localhost:9200' });
 
 dotenv.config();
 
