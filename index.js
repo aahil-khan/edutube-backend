@@ -164,8 +164,8 @@ app.get('/search', async (req, res) => {
                                 { multi_match: { query: sanitizedKeyword, fields: ['title^3', 'chapter_name^2', 'keywords'], fuzziness: 'AUTO' } }
                             ],
                             filter: [
-                                courseId ? { term: { course_id: courseId } } : {},
-                                teacherId ? { term: { teacher_id: teacherId } } : {}
+                                courseId ? { term: { course_id: courseId } } : null,
+                                teacherId ? { term: { teacher_id: teacherId } } : null
                             ].filter(Boolean)
                         }
                     }
