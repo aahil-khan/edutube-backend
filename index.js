@@ -200,7 +200,75 @@ app.get('/search', async (req, res) => {
         }
 
         const { hits } = await esClient.search(esQuery);
-        const results = hits.hits.map(hit => hit._source);
+        const results = hits.hits.map(hit => {
+            const source = hit._source;
+            switch (type) {
+                case 'courses':
+                    return {
+                        course_id: source.id,
+                        course_name: source.name,
+                        teacher_id: source.teacher_id,
+                        teacher_name: source.teacher_name,
+                        type: source.type,
+                    };
+                case 'lectures':
+                    return {
+                        lecture_id: source.id,
+                        lecture_title: source.title,
+                        chapter_number: source.chapter_number,
+                        chapter_name: source.chapter_name,
+                        lecture_number: source.lecture_number,
+                        course_name: source.course_name,
+                        teacher_name: source.teacher_name,
+                        teacher_id: source.teacher_id,
+                        type: source.type,
+                    };
+                case 'teachers':
+                    return {
+                        teacher_id: source.id,
+                        teacher_name: source.name,
+                        type: source.type,
+                    };
+                default:
+                    if(source.type === 'lecture'){
+                        return {
+                            course_id: null,
+                            course_name: source.course_name,
+                            teacher_id: source.teacher_id,
+                            teacher_name: source.teacher_name,
+                            lecture_id: source.id,
+                            lecture_title: source.title,
+                            chapter_number: source.chapter_number,
+                            lecture_number: source.lecture_number,
+                            type: 'lecture',
+                        }
+                    }else if(source.type === 'course'){
+                        return {
+                            course_id: source.id,
+                            course_name: source.name,
+                            teacher_id: source.teacher_id,
+                            teacher_name: source.teacher_name,
+                            lecture_id: null,
+                            lecture_title: null,
+                            chapter_number: null,
+                            lecture_number: null,
+                            type: 'course',
+                        }
+                    }else if(source.type === 'teacher'){
+                        return {
+                            course_id: null,
+                            course_name: null,
+                            teacher_id: source.id,
+                            teacher_name: source.name,
+                            lecture_id: null,
+                            lecture_title: null,
+                            chapter_number: null,
+                            lecture_number: null,
+                            type: 'teacher',
+                        }
+                    }
+            }
+        });
 
         await redisClient.set(cacheKey, JSON.stringify(results), { EX: 3600 });
 
@@ -284,28 +352,98 @@ app.post('/change-password', authenticateToken, async (req, res) => {
     const newHash = await bcrypt.hash(newPassword, 10);
     const query = `UPDATE Users SET password_hash = $1 WHERE id = $2`;
     await db.query(query, [newHash, userId]);
-    res.status(200).json({message:"Password changed successfully"});
+
+    // Update Redis cache after password change
+    const cacheKey = `user_data_${userId}`;
+    const updatedUserData = { password_hash: newHash }; // You may want to fetch the updated user data
+    await redisClient.set(cacheKey, JSON.stringify(updatedUserData), { EX: 3600 });
+
+    res.status(200).json({ message: "Password changed successfully" });
 });
 
 app.post('/enroll_course', authenticateToken, async (req, res) => {
-    try{
+    const client = await db.connect(); 
+    try {
+        await client.query('BEGIN'); 
         const { studentId, teacherId } = req.body;
         const query = `INSERT INTO enrollments (student_id, teacher_id) VALUES ($1, $2)`;
-        await db.query(query, [studentId, teacherId]);
-        res.status(200).json({message:"Student enrolled successfully"});
-    }catch(error){
-        res.status(500).send("Error:",error.stack);
+        await client.query(query, [studentId, teacherId]);
+        await client.query('COMMIT');
+
+        // Update Redis cache after enrolling
+        const cacheKey = `user_data_${studentId}`;
+        const updatedUserData = await db.query('SELECT name, email FROM Users WHERE id = $1', [studentId]);
+        const enrolledCoursesQuery = `
+            SELECT 
+                e.teacher_id AS teacher_id,
+                c.name AS course_name,
+                u.name AS teacher_name
+            FROM 
+                enrollments e
+            INNER JOIN 
+                teachers t ON e.teacher_id = t.id
+            INNER JOIN 
+                courses c ON t.course_id = c.id
+            INNER JOIN
+                users u on u.id = t.user_id
+            WHERE e.student_id = $1;
+        `;
+        const enrolledCoursesResult = await db.query(enrolledCoursesQuery, [studentId]);
+        const enrolledCourses = enrolledCoursesResult.rows.map(row => ({
+            teacher_id: row.teacher_id,
+            teacher_name: row.teacher_name,
+            course_name: row.course_name
+        }));
+
+        const userData = { name: updatedUserData.rows[0].name, email: updatedUserData.rows[0].email, enrolled_courses: enrolledCourses };
+        await redisClient.set(cacheKey, JSON.stringify(userData), { EX: 3600 });
+
+        res.status(200).json({ message: "Student enrolled successfully" });
+    } catch (error) {
+        await client.query('ROLLBACK');
+        res.status(500).send("Error:", error.stack);
+    } finally {
+        client.release();
     }
 });
 
 app.delete('/unenroll_course', authenticateToken, async (req, res) => {
-    try{
+    try {
         const { studentId, teacherId } = req.body;
         const query = `DELETE FROM enrollments WHERE student_id = $1 AND teacher_id = $2`;
         await db.query(query, [studentId, teacherId]);
-        res.status(200).json({message:"Student unenrolled successfully"});
-    }catch(error){
-        res.status(500).send("Error:",error.stack);
+
+        // Update Redis cache after unenrolling
+        const cacheKey = `user_data_${studentId}`;
+        const updatedUserData = await db.query('SELECT name, email FROM Users WHERE id = $1', [studentId]);
+        const enrolledCoursesQuery = `
+            SELECT 
+                e.teacher_id AS teacher_id,
+                c.name AS course_name,
+                u.name AS teacher_name
+            FROM 
+                enrollments e
+            INNER JOIN 
+                teachers t ON e.teacher_id = t.id
+            INNER JOIN 
+                courses c ON t.course_id = c.id
+            INNER JOIN
+                users u on u.id = t.user_id
+            WHERE e.student_id = $1;
+        `;
+        const enrolledCoursesResult = await db.query(enrolledCoursesQuery, [studentId]);
+        const enrolledCourses = enrolledCoursesResult.rows.map(row => ({
+            teacher_id: row.teacher_id,
+            teacher_name: row.teacher_name,
+            course_name: row.course_name
+        }));
+
+        const userData = { name: updatedUserData.rows[0].name, email: updatedUserData.rows[0].email, enrolled_courses: enrolledCourses };
+        await redisClient.set(cacheKey, JSON.stringify(userData), { EX: 3600 });
+
+        res.status(200).json({ message: "Student unenrolled successfully" });
+    } catch (error) {
+        res.status(500).send("Error:", error.stack);
     }
 });
 
