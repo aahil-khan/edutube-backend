@@ -14,18 +14,26 @@ dotenv.config();
 
 const { Pool } = pg;
 
-const db = new Pool({
-    user: process.env.DB_USER,
-    host: process.env.DB_HOST,
-    database: process.env.DB_NAME,
-    password: process.env.DB_PASSWORD,
-    port: process.env.DB_PORT,
-    max: 10,
-    // idleTimeoutMillis: 10000,
-    // connectionTimeoutMillis: 2000,
-    ssl: {
-        rejectUnauthorized: false,
-    },
+// const db = new Pool({
+//     user: process.env.DB_USER,
+//     host: process.env.DB_HOST,
+//     database: process.env.DB_NAME,
+//     password: process.env.DB_PASSWORD,
+//     port: process.env.DB_PORT,
+//     max: 10,
+//     // idleTimeoutMillis: 10000,
+//     // connectionTimeoutMillis: 2000,
+//     ssl: {
+//         rejectUnauthorized: false,
+//     },
+// });
+
+const db = new pg.Pool({
+    user:"postgres",
+    host:"localhost",
+    database:"Video_Portal_Dummy",
+    password:"pgadmin",
+    port:5432
 });
 
 db.connect();
@@ -457,6 +465,7 @@ app.get('/courses/:id', async (req, res) => {
     try {
       const query = `
         SELECT 
+            L.id,
             L.chapter_name,
             L.chapter_number,
             L.lecture_number,
@@ -486,11 +495,11 @@ app.get('/courses/:id', async (req, res) => {
         }
   
         chapter.lectures.push({
-          lecture_number: row.lecture_number,
-          lecture_title: row.lecture_title,
-          lecture_path: row.lecture_path,
+            lecture_id: row.id,
+            lecture_number: row.lecture_number,
+            lecture_title: row.lecture_title,
+            lecture_path: row.lecture_path,
         });
-  
         return acc;
       }, []);
   
@@ -500,6 +509,77 @@ app.get('/courses/:id', async (req, res) => {
       res.status(500).json({ error: 'Internal Server Error' });
     }
 });
+
+app.post("/watch-history", authenticateToken, async (req, res) => {
+    console.log(req.body);
+    try {
+        const userId = req.user.id;
+        const query = `
+            INSERT INTO watchHistory (user_id, lecture_id, left_at_duration, progress_percentage)
+            SELECT $1, id, $2, $3
+            FROM lectures
+            WHERE youtube_url = 'https://www.youtube.com/watch?v=' || $4
+            ON CONFLICT (user_id, lecture_id) 
+            DO UPDATE SET 
+                left_at_duration = EXCLUDED.left_at_duration,
+                progress_percentage = EXCLUDED.progress_percentage,
+                last_watched_at = CURRENT_TIMESTAMP;
+        `;
+
+        await db.query(query, [userId, parseInt(req.body.currentTime), parseFloat(req.body.progress).toFixed(2), req.body.videoId]);
+        res.status(200).json({ message: "Watch history updated!" });
+    } catch (error) {
+        console.error('Error inserting watch history:', error);
+        res.status(500).json({ message: "Internal server error" });
+    }
+});
+
+
+app.get("/watch-history", authenticateToken,async(req,res)=>{
+    try {
+        const userId = req.user.id;
+        const query = `
+        SELECT 
+            l.teacher_id, 
+            l.chapter_number, 
+            l.lecture_number, 
+            l.title, 
+            c.name AS course_name, 
+            u.name AS teacher_name, 
+            w.left_at_duration, 
+            w.progress_percentage, 
+            w.last_watched_at 
+        FROM watchHistory w
+        JOIN lectures l ON w.lecture_id = l.id
+        JOIN courses c ON l.course_id = c.id
+        JOIN teachers t ON l.teacher_id = t.id
+        JOIN users u ON t.user_id = u.id
+        WHERE w.user_id = $1
+        ORDER BY last_watched_at DESC;
+        `;
+        const result = await db.query(query, [userId]); // Updated variable name to userId
+        res.send(result.rows);
+    } catch (error) {
+        res.status(500).json({ message: error.stack });
+    }
+})
+
+app.get("/getVideoProgress/:lec_id" , authenticateToken , async(req,res)=>{
+    try{
+        const id = req.params.lec_id;
+        const query = `
+            SELECT left_at_duration from watchhistory where lecture_id = $1
+        `
+        const result = await db.query(query,[id]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: "This video has not been watched before" });
+        } else {
+            return res.status(200).json({ left_at_duration: result.rows[0].left_at_duration });
+        }
+    }catch(error){
+        res.status(500).json({ message: error.stack });
+    }
+})
 
 
 //Authentication
@@ -548,7 +628,7 @@ app.post("/login", async (req, res) => {
         const accessToken = jwt.sign(
             { id: user.id, name: user.name, role: user.role },
             ACCESS_SECRET_KEY,                                      
-            { expiresIn: '15m' }                               
+            { expiresIn: '1d' }                               
         );
 
         const refreshToken = jwt.sign(
@@ -579,7 +659,7 @@ app.post('/refresh-token', (req, res) => {
         const accessToken = jwt.sign(
             { id: user.id, name: user.name, role: user.role },
             ACCESS_SECRET_KEY,
-            { expiresIn: '15m' }
+            { expiresIn: '1d' }
         );
 
         res.json({ accessToken , role:user.role});
