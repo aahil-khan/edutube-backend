@@ -14,27 +14,27 @@ dotenv.config();
 
 const { Pool } = pg;
 
-// const db = new Pool({
-//     user: process.env.DB_USER,
-//     host: process.env.DB_HOST,
-//     database: process.env.DB_NAME,
-//     password: process.env.DB_PASSWORD,
-//     port: process.env.DB_PORT,
-//     max: 10,
-//     // idleTimeoutMillis: 10000,
-//     // connectionTimeoutMillis: 2000,
-//     ssl: {
-//         rejectUnauthorized: false,
-//     },
-// });
-
-const db = new pg.Pool({
-    user:"postgres",
-    host:"localhost",
-    database:"Video_Portal_Dummy",
-    password:"pgadmin",
-    port:5432
+const db = new Pool({
+    user: process.env.DB_USER,
+    host: process.env.DB_HOST,
+    database: process.env.DB_NAME,
+    password: process.env.DB_PASSWORD,
+    port: process.env.DB_PORT,
+    max: 10,
+    // idleTimeoutMillis: 10000,
+    // connectionTimeoutMillis: 2000,
+    ssl: {
+        rejectUnauthorized: false,
+    },
 });
+
+// const db = new pg.Pool({
+//     user:"postgres",
+//     host:"localhost",
+//     database:"Video_Portal_Dummy",
+//     password:"pgadmin",
+//     port:5432
+// });
 
 db.connect();
 
