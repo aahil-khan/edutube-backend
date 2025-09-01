@@ -40,10 +40,18 @@ export const getWatchHistory = async (req, res) => {
             include: {
                 lecture: {
                     include: {
-                        course: true,
-                        teacher: {
+                        chapter: {
                             include: {
-                                user: true
+                                course_instance: {
+                                    include: {
+                                        course_template: true,
+                                        teacher: {
+                                            include: {
+                                                user: true
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

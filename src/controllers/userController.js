@@ -48,9 +48,9 @@ export const getStudentEnrolledCourses = async (req, res) => {
         const enrolledCourses = await prisma.enrollment.findMany({
             where: { student_id: id },
             include: {
+                course: true,
                 teacher: {
                     include: {
-                        course: true,
                         user: true
                     }
                 }
@@ -61,7 +61,7 @@ export const getStudentEnrolledCourses = async (req, res) => {
             return res.status(404).json({ message: 'No enrolled courses found' });
         } else {
             const coursesData = enrolledCourses.map(enrollment => ({
-                course_name: enrollment.teacher.course.name,
+                course_name: enrollment.course.name,
                 teacher_name: enrollment.teacher.user.name
             }));
 
@@ -95,9 +95,13 @@ export const getUserData = async (req, res) => {
         const enrolledCourses = await prisma.enrollment.findMany({
             where: { student_id: userId },
             include: {
+                course_instance: {
+                    include: {
+                        course_template: true
+                    }
+                },
                 teacher: {
                     include: {
-                        course: true,
                         user: true
                     }
                 }
@@ -107,7 +111,8 @@ export const getUserData = async (req, res) => {
         const coursesData = enrolledCourses.map(enrollment => ({
             teacher_id: enrollment.teacher.id,
             teacher_name: enrollment.teacher.user.name,
-            course_name: enrollment.teacher.course.name
+            course_name: enrollment.course_instance.course_template.name,
+            course_code: enrollment.course_instance.course_template.course_code
         }));
 
         const userData = { 

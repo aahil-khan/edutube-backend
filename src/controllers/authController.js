@@ -90,6 +90,5 @@ export const logout = (req, res) => {
 };
 
 export const verifyAuth = (req, res) => {
-    console.log('Authenticated user:', req.user);
     res.status(200).json({message:"token is valid", role:req.user.role});
 };

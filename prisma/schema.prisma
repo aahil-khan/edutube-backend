@@ -20,83 +20,132 @@ model User {
   updated_at    DateTime      @updatedAt
   
   // Relations
-  teachers      Teacher[]
-  enrollments   Enrollment[]
-  watchHistory  WatchHistory[]
+  teacher       Teacher?      // One-to-one: A user can be a teacher
+  enrollments   Enrollment[]  // One-to-many: Student enrollments
+  watchHistory  WatchHistory[] // One-to-many: Watch history
   
   @@map("users")
 }
 
-model Course {
-  id          Int       @id @default(autoincrement())
-  name        String
-  description String?
-  created_at  DateTime  @default(now())
-  updated_at  DateTime  @updatedAt
-  
-  // Relations
-  teachers    Teacher[]
-  lectures    Lecture[]
-  
-  @@map("courses")
-}
-
 model Teacher {
   id         Int          @id @default(autoincrement())
-  user_id    Int
-  course_id  Int
+  user_id    Int          @unique
   created_at DateTime     @default(now())
   updated_at DateTime     @updatedAt
   
   // Relations
-  user        User         @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  course      Course       @relation(fields: [course_id], references: [id], onDelete: Cascade)
-  enrollments Enrollment[]
-  lectures    Lecture[]
+  user             User             @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  course_instances CourseInstance[] // One-to-many: Teacher creates multiple course instances
+  enrollments      Enrollment[]     // One-to-many: Enrollments in teacher's courses
   
-  @@unique([user_id, course_id])
   @@map("teachers")
 }
 
-model Enrollment {
-  id         Int      @id @default(autoincrement())
-  student_id Int
-  teacher_id Int
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
+model CourseTemplate {
+  id          Int      @id @default(autoincrement())
+  course_code String   @unique // e.g., "CS101A", "MATH201"
+  name        String   // e.g., "Introduction to Programming"
+  description String?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  // Relations
+  course_instances CourseInstance[] // Multiple teacher implementations
+
+  @@map("course_templates")
+}
+
+model CourseInstance {
+  id                 Int      @id @default(autoincrement())
+  course_template_id Int      // Links to course template
+  teacher_id         Int      // Which teacher teaches this instance
+  instance_name      String?  // e.g., "Morning Batch", "Advanced Track"
+  is_active          Boolean  @default(true)
+  created_at         DateTime @default(now())
+  updated_at         DateTime @updatedAt
+
+  // Relations
+  course_template CourseTemplate @relation(fields: [course_template_id], references: [id], onDelete: Cascade)
+  teacher         Teacher        @relation(fields: [teacher_id], references: [id], onDelete: Cascade)
+  chapters        Chapter[]      // Each instance has its own chapters
+  enrollments     Enrollment[]   // Students enroll in specific instances
+
+  // Ensure one teacher can't have duplicate instances of same course
+  @@unique([course_template_id, teacher_id])
+  @@map("course_instances")
+}
+
+model Chapter {
+  id                 Int      @id @default(autoincrement())
+  course_instance_id Int      // Links to specific course instance
+  name               String
+  description        String?
+  number             Int      // Chapter order number
+  created_at         DateTime @default(now())
+  updated_at         DateTime @updatedAt
   
   // Relations
-  student User    @relation(fields: [student_id], references: [id], onDelete: Cascade)
-  teacher Teacher @relation(fields: [teacher_id], references: [id], onDelete: Cascade)
+  course_instance CourseInstance @relation(fields: [course_instance_id], references: [id], onDelete: Cascade)
+  lectures        Lecture[]      // One-to-many: Chapter has multiple lectures
   
-  @@unique([student_id, teacher_id])
+  @@unique([course_instance_id, number])
+  @@map("chapters")
+}
+
+model Enrollment {
+  id                 Int      @id @default(autoincrement())
+  student_id         Int      // Foreign key to user (student)
+  course_instance_id Int      // Foreign key to course instance
+  teacher_id         Int      // Foreign key to teacher (for easier queries)
+  created_at         DateTime @default(now())
+  updated_at         DateTime @updatedAt
+  
+  // Relations
+  student         User           @relation(fields: [student_id], references: [id], onDelete: Cascade)
+  course_instance CourseInstance @relation(fields: [course_instance_id], references: [id], onDelete: Cascade)
+  teacher         Teacher        @relation(fields: [teacher_id], references: [id], onDelete: Cascade)
+  
+  @@unique([student_id, course_instance_id]) // A student can only enroll once per course instance
   @@map("enrollments")
 }
 
 model Lecture {
   id             Int            @id @default(autoincrement())
-  teacher_id     Int
-  course_id      Int
-  chapter_name   String
-  chapter_number Int
-  lecture_number Int
+  chapter_id     Int            // Foreign key to chapter
+  lecture_number Int            // Order within the chapter
   title          String
+  description    String?
   youtube_url    String
+  duration       Int            @default(0) // Duration in seconds
   created_at     DateTime       @default(now())
   updated_at     DateTime       @updatedAt
   
   // Relations
-  teacher       Teacher        @relation(fields: [teacher_id], references: [id], onDelete: Cascade)
-  course        Course         @relation(fields: [course_id], references: [id], onDelete: Cascade)
-  watchHistory  WatchHistory[]
+  chapter      Chapter        @relation(fields: [chapter_id], references: [id], onDelete: Cascade)
+  watchHistory WatchHistory[] // One-to-many: Watch history for this lecture
+  tags         LectureTag[]   // One-to-many: Tags for this lecture
   
+  @@unique([chapter_id, lecture_number]) // Unique lecture number per chapter
   @@map("lectures")
+}
+
+model LectureTag {
+  id         Int      @id @default(autoincrement())
+  lecture_id Int      // Foreign key to lecture
+  tag        String   // The tag/keyword
+  created_at DateTime @default(now())
+  
+  // Relations
+  lecture Lecture @relation(fields: [lecture_id], references: [id], onDelete: Cascade)
+  
+  @@unique([lecture_id, tag]) // Prevent duplicate tags for the same lecture
+  @@map("lecture_tags")
 }
 
 model WatchHistory {
   id           Int      @id @default(autoincrement())
-  user_id      Int
-  lecture_id   Int
+  user_id      Int      // Foreign key to user (student)
+  lecture_id   Int      // Foreign key to lecture
   progress     Float    @default(0.0) // Progress in percentage (0-100)
   last_watched DateTime @default(now())
   created_at   DateTime @default(now())
@@ -106,6 +155,6 @@ model WatchHistory {
   user    User    @relation(fields: [user_id], references: [id], onDelete: Cascade)
   lecture Lecture @relation(fields: [lecture_id], references: [id], onDelete: Cascade)
   
-  @@unique([user_id, lecture_id])
+  @@unique([user_id, lecture_id]) // One watch record per user per lecture
   @@map("watch_history")
 }
