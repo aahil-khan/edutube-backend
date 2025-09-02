@@ -144,6 +144,7 @@ model WatchHistory {
   user_id      Int      // Foreign key to user (student)
   lecture_id   Int      // Foreign key to lecture
   progress     Float    @default(0.0) // Progress in percentage (0-100)
+  current_time Int      @default(0) // Current time position in seconds
   last_watched DateTime @default(now())
   created_at   DateTime @default(now())
   updated_at   DateTime @updatedAt

@@ -114,6 +114,32 @@ export const getUserData = async (req, res) => {
             }
         });
 
+        // Get watch history stats
+        const watchHistoryStats = await prisma.watchHistory.findMany({
+            where: { user_id: userId },
+            select: {
+                progress: true,
+                lecture: {
+                    select: {
+                        duration: true
+                    }
+                }
+            }
+        });
+
+        // Calculate stats
+        const videosWatched = watchHistoryStats.length;
+        const totalWatchTime = watchHistoryStats.reduce((total, history) => {
+            if (history.lecture.duration && history.progress) {
+                return total + (history.lecture.duration * history.progress / 100);
+            }
+            return total;
+        }, 0);
+        const learningHours = Math.floor(totalWatchTime / 3600);
+        const overallProgress = enrolledCourses.length > 0 
+            ? Math.round(watchHistoryStats.reduce((sum, h) => sum + h.progress, 0) / Math.max(watchHistoryStats.length, 1))
+            : 0;
+
         const coursesData = enrolledCourses.map(enrollment => ({
             course_instance_id: enrollment.course_instance.id,
             teacher_id: enrollment.course_instance.teacher.id,
@@ -125,7 +151,11 @@ export const getUserData = async (req, res) => {
         const userData = { 
             name: user.name, 
             email: user.email, 
-            enrolled_courses: coursesData 
+            enrolled_courses: coursesData,
+            // Add watch history stats
+            videos_watched: videosWatched,
+            learning_hours: learningHours,
+            overall_progress: overallProgress
         };
 
         console.log(userData);

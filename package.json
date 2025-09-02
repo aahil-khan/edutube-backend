@@ -10,13 +10,13 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
-    "seed": "node scripts/seed.js"
+    "seed": "node scripts/seed.js",
+    "search:indexes": "node scripts/applySearchIndexes.js"
   },
   "author": "",
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "@elastic/elasticsearch": "^8.17.0",
     "@prisma/client": "^5.22.0",
     "axios": "^1.11.0",
     "bcrypt": "^5.1.1",
