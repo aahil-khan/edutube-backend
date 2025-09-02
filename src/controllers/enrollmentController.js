@@ -55,3 +55,24 @@ export const unenrollCourse = async (req, res) => {
         res.status(500).json({ message: 'Server error' });
     }
 };
+
+export const checkEnrollment = async (req, res) => {
+    try {
+        const { course_instance_id } = req.params;
+        const studentId = req.user.id; // Get from authenticated user
+        
+        const enrollment = await prisma.enrollment.findUnique({
+            where: {
+                student_id_course_instance_id: {
+                    student_id: studentId,
+                    course_instance_id: parseInt(course_instance_id)
+                }
+            }
+        });
+
+        res.status(200).json({ isEnrolled: !!enrollment });
+    } catch (error) {
+        console.error('Check enrollment error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
