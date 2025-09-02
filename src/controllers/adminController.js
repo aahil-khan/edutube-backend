@@ -1904,10 +1904,10 @@ export const updateLectureWithTags = async (req, res) => {
 
         // Update lecture basic info
         const updateData = {};
-        if (title) updateData.title = title;
-        if (description) updateData.description = description;
-        if (youtube_url) updateData.youtube_url = youtube_url;
-        if (duration) updateData.duration = duration;
+        if (title !== undefined) updateData.title = title;
+        if (description !== undefined) updateData.description = description;
+        if (youtube_url !== undefined) updateData.youtube_url = youtube_url;
+        if (duration !== undefined) updateData.duration = duration;
 
         const lecture = await prisma.lecture.update({
             where: { id: parseInt(id) },
