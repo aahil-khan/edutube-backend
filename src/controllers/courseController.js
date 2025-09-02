@@ -79,6 +79,15 @@ export const getAllCoursesForBrowsing = async (req, res) => {
                         }
                     }
                 },
+                chapters: {
+                    include: {
+                        _count: {
+                            select: {
+                                lectures: true
+                            }
+                        }
+                    }
+                },
                 _count: {
                     select: {
                         chapters: true,
@@ -92,21 +101,100 @@ export const getAllCoursesForBrowsing = async (req, res) => {
         });
 
         // Transform the data for frontend consumption
-        const courses = courseInstances.map(instance => ({
-            id: instance.id,
-            course_name: instance.course_template.name,
-            course_code: instance.course_template.course_code,
-            description: instance.course_template.description,
-            teacher_id: instance.teacher.id,
-            teacher_name: instance.teacher.user.name,
-            chapter_count: instance._count.chapters,
-            enrollment_count: instance._count.enrollments,
-            created_at: instance.created_at
-        }));
+        const courses = courseInstances.map(instance => {
+            const totalLectures = instance.chapters.reduce((total, chapter) => 
+                total + chapter._count.lectures, 0
+            );
+            
+            return {
+                id: instance.id,
+                course_name: instance.course_template.name,
+                course_code: instance.course_template.course_code,
+                description: instance.course_template.description,
+                teacher_id: instance.teacher.id,
+                teacher_name: instance.teacher.user.name,
+                chapter_count: instance._count.chapters,
+                lecture_count: totalLectures,
+                enrollment_count: instance._count.enrollments,
+                created_at: instance.created_at
+            };
+        });
 
         res.json(courses);
     } catch (error) {
         console.error('Error fetching courses for browsing:', error);
+        res.status(500).send('Server error');
+    }
+};
+
+// Get single course instance by ID
+export const getCourseInstanceById = async (req, res) => {
+    const courseInstanceId = parseInt(req.params.id);
+  
+    if (isNaN(courseInstanceId)) {
+        return res.status(400).json({ message: 'Invalid course instance ID' });
+    }
+  
+    try {
+        const courseInstance = await prisma.courseInstance.findUnique({
+            where: { id: courseInstanceId },
+            include: {
+                course_template: true,
+                teacher: {
+                    include: {
+                        user: {
+                            select: {
+                                name: true,
+                                email: true
+                            }
+                        }
+                    }
+                },
+                chapters: {
+                    include: {
+                        lectures: {
+                            orderBy: {
+                                created_at: 'asc'
+                            }
+                        }
+                    },
+                    orderBy: {
+                        created_at: 'asc'
+                    }
+                }
+            }
+        });
+
+        if (!courseInstance) {
+            return res.status(404).json({ message: 'Course instance not found' });
+        }
+
+        // Transform for frontend - return chapters directly as expected
+        const chaptersData = courseInstance.chapters.map(chapter => ({
+            id: chapter.id,
+            chapter_number: chapter.number,
+            chapter_name: chapter.name,
+            title: chapter.name,
+            description: chapter.description,
+            course_name: courseInstance.course_template.name,
+            instructor_name: courseInstance.teacher.user.name,
+            lectures: chapter.lectures.map(lecture => ({
+                id: lecture.id,
+                lecture_id: lecture.id,
+                lecture_number: lecture.lecture_number,
+                lecture_title: lecture.title,
+                title: lecture.title,
+                description: lecture.description,
+                lecture_path: lecture.youtube_url || lecture.video_url || '',
+                youtube_url: lecture.youtube_url || lecture.video_url || '',
+                video_url: lecture.youtube_url || lecture.video_url || '',
+                duration: lecture.duration
+            }))
+        }));
+
+        res.json(chaptersData);
+    } catch (error) {
+        console.error('Error fetching course instance:', error);
         res.status(500).send('Server error');
     }
 };

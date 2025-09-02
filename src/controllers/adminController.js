@@ -1010,10 +1010,14 @@ export const updateChapter = async (req, res) => {
             where: { id: parseInt(id) },
             data: updateData,
             include: {
-                course: {
-                    select: {
-                        id: true,
-                        name: true
+                course_instance: {
+                    include: {
+                        course_template: {
+                            select: {
+                                course_code: true,
+                                name: true
+                            }
+                        }
                     }
                 },
                 _count: {
@@ -1244,7 +1248,8 @@ export const createLecture = async (req, res) => {
             youtube_url, 
             duration, // This is optional
             chapter_id,
-            lecture_number 
+            lecture_number,
+            tags // Array of tag strings
         } = req.body;
 
         // Validate required fields
@@ -1302,46 +1307,68 @@ export const createLecture = async (req, res) => {
         // Convert duration to integer, default to 0 if not available
         const durationInSeconds = finalDuration ? parseInt(finalDuration) : 0;
 
-        const lecture = await prisma.lecture.create({
-            data: {
-                title,
-                description: description || '',
-                youtube_url,
-                duration: durationInSeconds,
-                chapter_id: parseInt(chapter_id),
-                lecture_number: parseInt(lecture_number)
-            },
-            include: {
-                chapter: {
-                    select: {
-                        id: true,
-                        name: true,
-                        number: true,
-                        course: chapter.course ? {
-                            select: {
-                                id: true,
-                                name: true
-                            }
-                        } : undefined,
-                        course_instance: chapter.course_instance ? {
-                            include: {
-                                course_template: {
-                                    select: {
-                                        course_code: true,
-                                        name: true
+        // Validate and process tags
+        let processedTags = [];
+        if (tags && Array.isArray(tags)) {
+            processedTags = tags
+                .filter(tag => tag && typeof tag === 'string')
+                .map(tag => tag.trim().toLowerCase())
+                .filter(tag => tag.length > 0)
+                .slice(0, 10); // Limit to 10 tags
+        }
+
+        const result = await prisma.$transaction(async (tx) => {
+            // Create the lecture
+            const lecture = await tx.lecture.create({
+                data: {
+                    title,
+                    description: description || '',
+                    youtube_url,
+                    duration: durationInSeconds,
+                    chapter_id: parseInt(chapter_id),
+                    lecture_number: parseInt(lecture_number)
+                }
+            });
+
+            // Create tags if provided
+            if (processedTags.length > 0) {
+                await tx.lectureTag.createMany({
+                    data: processedTags.map(tag => ({
+                        lecture_id: lecture.id,
+                        tag: tag
+                    }))
+                });
+            }
+
+            // Return lecture with all related data
+            return await tx.lecture.findUnique({
+                where: { id: lecture.id },
+                include: {
+                    chapter: {
+                        select: {
+                            id: true,
+                            name: true,
+                            number: true,
+                            course_instance: {
+                                include: {
+                                    course_template: {
+                                        select: {
+                                            course_code: true,
+                                            name: true
+                                        }
                                     }
                                 }
                             }
-                        } : undefined
-                    }
-                },
-                tags: true
-            }
+                        }
+                    },
+                    tags: true
+                }
+            });
         });
 
         res.status(201).json({ 
             message: 'Lecture created successfully', 
-            lecture,
+            lecture: result,
             note: finalDuration ? 'Duration provided' : 'Duration set to 0 (could not auto-fetch)'
         });
     } catch (error) {
@@ -1609,16 +1636,23 @@ export const searchLecturesByTags = async (req, res) => {
             where,
             include: {
                 tags: true,
-                course: {
-                    select: {
-                        id: true,
-                        name: true
+                chapter: {
+                    include: {
+                        course_instance: {
+                            include: {
+                                course_template: {
+                                    select: {
+                                        course_code: true,
+                                        name: true
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             },
             orderBy: [
-                { course_id: 'asc' },
-                { chapter_number: 'asc' },
+                { chapter_id: 'asc' },
                 { lecture_number: 'asc' }
             ]
         });
@@ -1715,10 +1749,18 @@ export const updateLectureWithTags = async (req, res) => {
                 tags: {
                     orderBy: { tag: 'asc' }
                 },
-                course: {
-                    select: {
-                        id: true,
-                        name: true
+                chapter: {
+                    include: {
+                        course_instance: {
+                            include: {
+                                course_template: {
+                                    select: {
+                                        course_code: true,
+                                        name: true
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
