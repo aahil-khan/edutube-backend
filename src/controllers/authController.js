@@ -31,19 +31,19 @@ export const login = async (req, res) => {
         const accessToken = jwt.sign(
             { id: user.id, name: user.name, role: user.role },
             ACCESS_SECRET_KEY,
-            { expiresIn: '15m' }
+            { expiresIn: '1d' }
         );
 
         const refreshToken = jwt.sign(
             { id: user.id, name: user.name, role: user.role },
             REFRESH_SECRET_KEY,
-            { expiresIn: '7d' }
+            { expiresIn: '30d' }
         );
 
         res.cookie('refreshToken', refreshToken, {
             httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
-            maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+            maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
         });
 
         res.json({
@@ -78,7 +78,7 @@ export const refreshToken = (req, res) => {
         const accessToken = jwt.sign(
             { id: user.id, name: user.name, role: user.role },
             ACCESS_SECRET_KEY,
-            { expiresIn: '15m' }
+            { expiresIn: '1d' }
         );
 
         res.json({ accessToken });

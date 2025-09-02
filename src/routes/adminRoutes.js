@@ -34,7 +34,9 @@ import {
     getLectureTags,
     searchLecturesByTags,
     getAllUniqueTags,
-    updateLectureWithTags
+    updateLectureWithTags,
+    fetchYouTubePlaylist,
+    bulkImportLectures
 } from '../controllers/adminController.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { requireAdmin } from '../middleware/adminAuth.js';
@@ -99,5 +101,9 @@ router.get('/tags/unique', getAllUniqueTags);
 
 // Dropdown helpers
 router.get('/students/dropdown', getStudentsForDropdown);
+
+// YouTube Playlist Import
+router.post('/youtube/fetch-playlist', fetchYouTubePlaylist);
+router.post('/youtube/bulk-import-lectures', bulkImportLectures);
 
 export default router;

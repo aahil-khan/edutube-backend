@@ -1,5 +1,11 @@
 import prisma from '../config/db.js';
 import bcrypt from 'bcrypt';
+import { 
+    getPlaylistIdFromUrl, 
+    fetchPlaylistVideos, 
+    parseYouTubeDuration, 
+    generateYouTubeUrl 
+} from '../utils/youtubeHelpers.js';
 
 // Helper function to extract YouTube video ID from URL
 const getYouTubeVideoId = (url) => {
@@ -43,14 +49,14 @@ export const getDashboardStats = async (req, res) => {
         ]);
 
         const recentUsers = await prisma.user.findMany({
-            take: 5,
+            take: 3,
             orderBy: { created_at: 'desc' },
             select: { id: true, name: true, email: true, role: true, created_at: true }
         });
 
         // Get recent course instances instead of courses
         const recentCourseInstances = await prisma.courseInstance.findMany({
-            take: 5,
+            take: 3,
             orderBy: { created_at: 'desc' },
             include: {
                 teacher: {
@@ -1773,5 +1779,160 @@ export const updateLectureWithTags = async (req, res) => {
     } catch (error) {
         console.error('Update lecture with tags error:', error);
         res.status(500).json({ message: 'Server error' });
+    }
+};
+
+// YouTube Playlist Import Functions
+
+// Fetch videos from YouTube playlist
+export const fetchYouTubePlaylist = async (req, res) => {
+    try {
+        const { playlistUrl } = req.body;
+
+        if (!playlistUrl) {
+            return res.status(400).json({ message: 'Playlist URL is required' });
+        }
+
+        const playlistId = getPlaylistIdFromUrl(playlistUrl);
+        if (!playlistId) {
+            return res.status(400).json({ message: 'Invalid YouTube playlist URL' });
+        }
+
+        const result = await fetchPlaylistVideos(playlistId);
+        
+        if (!result.success) {
+            return res.status(400).json({ 
+                message: 'Failed to fetch playlist videos',
+                error: result.error 
+            });
+        }
+
+        // Format videos for frontend
+        const formattedVideos = result.videos.map((video, index) => {
+            const videoId = video.snippet.resourceId?.videoId || video.id.videoId;
+            return {
+                id: videoId,
+                title: video.snippet.title,
+                description: video.snippet.description,
+                thumbnail: video.snippet.thumbnails?.medium?.url || 
+                          `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`,
+                duration: parseYouTubeDuration(video.contentDetails?.duration),
+                youtubeUrl: generateYouTubeUrl(videoId),
+                position: video.snippet.position || index,
+                selected: true // Default to selected
+            };
+        });
+
+        res.json({
+            success: true,
+            videos: formattedVideos,
+            totalCount: formattedVideos.length,
+            playlistId
+        });
+
+    } catch (error) {
+        console.error('Fetch playlist error:', error);
+        res.status(500).json({ 
+            message: 'Server error while fetching playlist',
+            error: error.message 
+        });
+    }
+};
+
+// Bulk import videos as lectures
+export const bulkImportLectures = async (req, res) => {
+    try {
+        const { courseInstanceId, lectureData } = req.body;
+
+        if (!courseInstanceId || !lectureData || !Array.isArray(lectureData)) {
+            return res.status(400).json({ 
+                message: 'Course instance ID and lecture data array are required' 
+            });
+        }
+
+        // Verify course instance exists
+        const courseInstance = await prisma.courseInstance.findUnique({
+            where: { id: parseInt(courseInstanceId) },
+            include: { chapters: true }
+        });
+
+        if (!courseInstance) {
+            return res.status(404).json({ message: 'Course instance not found' });
+        }
+
+        const results = {
+            created: [],
+            errors: [],
+            chaptersCreated: []
+        };
+
+        // Process lectures in order
+        for (const lectureInfo of lectureData) {
+            try {
+                const { 
+                    title, 
+                    description, 
+                    youtubeUrl, 
+                    duration, 
+                    chapterName, 
+                    lectureNumber,
+                    chapterNumber 
+                } = lectureInfo;
+
+                // Find or create chapter
+                let chapter = courseInstance.chapters.find(ch => ch.name === chapterName);
+                if (!chapter) {
+                    chapter = await prisma.chapter.create({
+                        data: {
+                            name: chapterName,
+                            description: `Chapter containing ${chapterName} lectures`,
+                            number: chapterNumber || (courseInstance.chapters.length + results.chaptersCreated.length + 1),
+                            course_instance_id: courseInstance.id
+                        }
+                    });
+                    results.chaptersCreated.push(chapter);
+                    courseInstance.chapters.push(chapter); // Add to local array for next iterations
+                }
+
+                // Create lecture
+                const lecture = await prisma.lecture.create({
+                    data: {
+                        title: title,
+                        description: description || '',
+                        youtube_url: youtubeUrl,
+                        duration: duration || 0,
+                        lecture_number: lectureNumber,
+                        chapter_id: chapter.id
+                    }
+                });
+
+                results.created.push({
+                    id: lecture.id,
+                    title: lecture.title,
+                    chapterName: chapter.name,
+                    lectureNumber: lecture.lecture_number
+                });
+
+            } catch (error) {
+                console.error(`Error creating lecture "${lectureInfo.title}":`, error);
+                results.errors.push({
+                    title: lectureInfo.title,
+                    error: error.message
+                });
+            }
+        }
+
+        res.json({
+            success: true,
+            message: `Successfully imported ${results.created.length} lectures`,
+            results: results
+        });
+
+    } catch (error) {
+        console.error('Bulk import lectures error:', error);
+        res.status(500).json({ 
+            message: 'Server error during bulk import',
+            error: error.message 
+        });
     }
 };
