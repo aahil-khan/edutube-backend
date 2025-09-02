@@ -2,6 +2,7 @@ import express from 'express';
 import {
     getDashboardStats,
     getAllUsers,
+    getUserById,
     createUser,
     updateUser,
     deleteUser,
@@ -20,6 +21,7 @@ import {
     createChapter,
     updateChapter,
     deleteChapter,
+    reorderChapters,
     getChaptersForDropdown,
     getCourseTemplatesForDropdown,
     getCourseInstancesForDropdown,
@@ -27,6 +29,7 @@ import {
     createLecture,
     updateLecture,
     deleteLecture,
+    reorderLectures,
     getTeachersForDropdown,
     getStudentsForDropdown,
     addLectureTags,
@@ -52,6 +55,7 @@ router.get('/dashboard/stats', getDashboardStats);
 
 // User Management
 router.get('/users', getAllUsers);
+router.get('/users/:id', getUserById);
 router.post('/users', createUser);
 router.put('/users/:id', updateUser);
 router.delete('/users/:id', deleteUser);
@@ -79,6 +83,7 @@ router.get('/course-instances/dropdown', getCourseInstancesForDropdown);
 // Chapter Management
 router.get('/course-instances/:instanceId/chapters', getCourseInstanceChapters);
 router.post('/chapters', createChapter);
+router.put('/chapters/reorder', reorderChapters);
 router.put('/chapters/:id', updateChapter);
 router.delete('/chapters/:id', deleteChapter);
 router.get('/chapters/dropdown', getChaptersForDropdown);
@@ -86,6 +91,7 @@ router.get('/chapters/dropdown', getChaptersForDropdown);
 // Lecture Management
 router.get('/course-instances/:instanceId/lectures', getInstanceLectures);
 router.post('/lectures', createLecture);
+router.put('/lectures/reorder', reorderLectures);
 router.put('/lectures/:id', updateLecture);
 router.delete('/lectures/:id', deleteLecture);
 

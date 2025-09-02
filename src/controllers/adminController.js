@@ -197,6 +197,48 @@ export const createUser = async (req, res) => {
     }
 };
 
+export const getUserById = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const user = await prisma.user.findUnique({
+            where: { id: parseInt(id) },
+            select: {
+                id: true,
+                name: true,
+                email: true,
+                role: true,
+                created_at: true,
+                updated_at: true,
+                teacher: {
+                    select: {
+                        id: true,
+                        created_at: true,
+                        _count: {
+                            select: { course_instances: true }
+                        }
+                    }
+                },
+                _count: {
+                    select: { 
+                        enrollments: true,
+                        watchHistory: true
+                    }
+                }
+            }
+        });
+
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        res.json(user);
+    } catch (error) {
+        console.error('Get user by ID error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+
 export const updateUser = async (req, res) => {
     try {
         const { id } = req.params;
@@ -233,69 +275,48 @@ export const deleteUser = async (req, res) => {
     try {
         const { id } = req.params;
 
-        // Check if user has dependencies
-        const userWithDeps = await prisma.user.findUnique({
+        // Check if user exists
+        const user = await prisma.user.findUnique({
             where: { id: parseInt(id) },
             include: {
-                teacher: true,
-                enrollments: true,
-                watchHistory: true
+                teacher: {
+                    include: {
+                        course_instances: {
+                            include: {
+                                chapters: {
+                                    include: {
+                                        lectures: true
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         });
 
-        if (!userWithDeps) {
+        if (!user) {
             return res.status(404).json({ message: 'User not found' });
         }
 
         // Delete in transaction to maintain referential integrity
         await prisma.$transaction(async (tx) => {
-            // Delete watch history
-            await tx.watchHistory.deleteMany({
-                where: { user_id: parseInt(id) }
-            });
-
-            // Delete enrollments
-            await tx.enrollment.deleteMany({
-                where: { student_id: parseInt(id) }
-            });
-
-            // If user is a teacher, handle teacher dependencies
-            if (userWithDeps.teacher) {
-                // Delete enrollments for this teacher
-                await tx.enrollment.deleteMany({
-                    where: { teacher_id: userWithDeps.teacher.id }
-                });
-
-                // Delete lectures for course instances taught by this teacher
-                const teacherCourseInstances = await tx.courseInstance.findMany({
-                    where: { 
-                        teacher_id: userWithDeps.teacher.id
-                    },
-                    include: {
-                        chapters: {
-                            include: {
-                                lectures: true
-                            }
-                        }
-                    }
-                });
-
-                // Delete all lectures in chapters of this teacher's course instances
-                for (const instance of teacherCourseInstances) {
-                    for (const chapter of instance.chapters) {
-                        await tx.lecture.deleteMany({
-                            where: { chapter_id: chapter.id }
-                        });
-                    }
+            // If user is a teacher, we need to handle course instances carefully
+            if (user.teacher) {
+                // Delete all chapters (which will cascade delete lectures and their tags)
+                for (const instance of user.teacher.course_instances) {
+                    await tx.chapter.deleteMany({
+                        where: { course_instance_id: instance.id }
+                    });
                 }
 
-                // Delete teacher record
-                await tx.teacher.delete({
-                    where: { id: userWithDeps.teacher.id }
+                // Delete course instances
+                await tx.courseInstance.deleteMany({
+                    where: { teacher_id: user.teacher.id }
                 });
             }
 
-            // Finally delete the user
+            // Delete the user (this will cascade delete teacher, enrollments, watch history)
             await tx.user.delete({
                 where: { id: parseInt(id) }
             });
@@ -304,7 +325,21 @@ export const deleteUser = async (req, res) => {
         res.json({ message: 'User deleted successfully' });
     } catch (error) {
         console.error('Delete user error:', error);
-        res.status(500).json({ message: 'Server error' });
+        console.error('Error details:', error.message);
+        console.error('Error stack:', error.stack);
+        
+        // Check for specific Prisma errors
+        if (error.code === 'P2003') {
+            return res.status(400).json({ 
+                message: 'Cannot delete user due to existing dependencies. Please remove related data first.',
+                error: process.env.NODE_ENV === 'development' ? error.message : 'Dependency constraint error'
+            });
+        }
+        
+        res.status(500).json({ 
+            message: 'Server error', 
+            error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+        });
     }
 };
 
@@ -346,11 +381,14 @@ export const getAllTeachers = async (req, res) => {
                                     name: true,
                                     course_code: true
                                 }
+                            },
+                            _count: {
+                                select: { enrollments: true }
                             }
                         }
                     },
                     _count: {
-                        select: { enrollments: true, course_instances: true }
+                        select: { course_instances: true }
                     }
                 },
                 orderBy: { created_at: 'desc' }
@@ -934,23 +972,16 @@ export const createChapter = async (req, res) => {
         const { 
             name, 
             description, 
-            number, 
+            number,  // This is optional - will auto-assign if not provided
             course_instance_id   // Required: links to course instance
         } = req.body;
 
         // Validate required fields
-        if (!name || number === undefined || !course_instance_id) {
+        if (!name || !course_instance_id) {
             return res.status(400).json({ 
-                message: 'Missing required fields: name, number, course_instance_id' 
+                message: 'Missing required fields: name, course_instance_id' 
             });
         }
-
-        const chapterData = {
-            name,
-            description: description || '',
-            number: parseInt(number),
-            course_instance_id: parseInt(course_instance_id)
-        };
 
         // Verify course instance exists
         const instance = await prisma.courseInstance.findUnique({
@@ -961,19 +992,38 @@ export const createChapter = async (req, res) => {
             return res.status(404).json({ message: 'Course instance not found' });
         }
 
-        // Check if chapter number already exists for this instance
-        const existingChapter = await prisma.chapter.findFirst({
-            where: {
-                course_instance_id: parseInt(course_instance_id),
-                number: parseInt(number)
-            }
-        });
-
-        if (existingChapter) {
-            return res.status(400).json({ 
-                message: 'Chapter number already exists for this course instance' 
+        // Determine chapter number
+        let finalChapterNumber = number;
+        
+        if (!finalChapterNumber) {
+            // Auto-assign the next available chapter number
+            const lastChapter = await prisma.chapter.findFirst({
+                where: { course_instance_id: parseInt(course_instance_id) },
+                orderBy: { number: 'desc' }
             });
+            finalChapterNumber = lastChapter ? lastChapter.number + 1 : 1;
+        } else {
+            // Check if chapter number already exists for this instance
+            const existingChapter = await prisma.chapter.findFirst({
+                where: {
+                    course_instance_id: parseInt(course_instance_id),
+                    number: parseInt(number)
+                }
+            });
+
+            if (existingChapter) {
+                return res.status(400).json({ 
+                    message: 'Chapter number already exists for this course instance' 
+                });
+            }
         }
+
+        const chapterData = {
+            name,
+            description: description || '',
+            number: parseInt(finalChapterNumber),
+            course_instance_id: parseInt(course_instance_id)
+        };
 
         const chapter = await prisma.chapter.create({
             data: chapterData,
@@ -1007,10 +1057,20 @@ export const updateChapter = async (req, res) => {
         const { id } = req.params;
         const { name, description, number } = req.body;
 
+        // Validate required parameters
+        if (!id || isNaN(parseInt(id))) {
+            return res.status(400).json({ message: 'Valid chapter ID is required' });
+        }
+
         const updateData = {};
         if (name) updateData.name = name;
         if (description !== undefined) updateData.description = description;
         if (number !== undefined) updateData.number = parseInt(number);
+
+        // Check if there's actually data to update
+        if (Object.keys(updateData).length === 0) {
+            return res.status(400).json({ message: 'No data provided for update' });
+        }
 
         const chapter = await prisma.chapter.update({
             where: { id: parseInt(id) },
@@ -1077,6 +1137,74 @@ export const deleteChapter = async (req, res) => {
     } catch (error) {
         console.error('Delete chapter error:', error);
         res.status(500).json({ message: 'Server error' });
+    }
+};
+
+export const reorderChapters = async (req, res) => {
+    try {
+        const { courseInstanceId, chapterOrders } = req.body;
+
+        console.log('Reorder chapters request:', { courseInstanceId, chapterOrders });
+
+        if (!courseInstanceId) {
+            console.log('Missing courseInstanceId');
+            return res.status(400).json({ message: 'Course instance ID is required' });
+        }
+
+        if (!chapterOrders || !Array.isArray(chapterOrders)) {
+            console.log('Invalid chapterOrders:', chapterOrders);
+            return res.status(400).json({ message: 'Chapter orders array is required' });
+        }
+
+        if (chapterOrders.length === 0) {
+            console.log('Empty chapterOrders array');
+            return res.status(400).json({ message: 'Chapter orders array cannot be empty' });
+        }
+
+        // Update chapter numbers in transaction using temporary numbering to avoid conflicts
+        await prisma.$transaction(async (tx) => {
+            const courseInstanceIdInt = parseInt(courseInstanceId);
+            
+            // First, set all chapters to temporary negative numbers to avoid conflicts
+            for (let i = 0; i < chapterOrders.length; i++) {
+                const order = chapterOrders[i];
+                if (!order.id || order.number === undefined) {
+                    console.log('Invalid order object:', order);
+                    throw new Error(`Invalid order object: ${JSON.stringify(order)}`);
+                }
+                
+                await tx.chapter.update({
+                    where: { 
+                        id: parseInt(order.id),
+                        course_instance_id: courseInstanceIdInt
+                    },
+                    data: { 
+                        number: -(i + 1) // Temporary negative number
+                    }
+                });
+            }
+            
+            // Then, update to the final positive numbers
+            for (const order of chapterOrders) {
+                await tx.chapter.update({
+                    where: { 
+                        id: parseInt(order.id),
+                        course_instance_id: courseInstanceIdInt
+                    },
+                    data: { 
+                        number: parseInt(order.number) 
+                    }
+                });
+            }
+        });
+
+        res.json({ message: 'Chapters reordered successfully' });
+    } catch (error) {
+        console.error('Reorder chapters error:', error);
+        res.status(500).json({ 
+            message: 'Server error',
+            error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+        });
     }
 };
 
@@ -1254,14 +1382,14 @@ export const createLecture = async (req, res) => {
             youtube_url, 
             duration, // This is optional
             chapter_id,
-            lecture_number,
+            lecture_number, // This is optional - will auto-assign if not provided
             tags // Array of tag strings
         } = req.body;
 
         // Validate required fields
-        if (!title || !youtube_url || !chapter_id || lecture_number === undefined) {
+        if (!title || !youtube_url || !chapter_id) {
             return res.status(400).json({ 
-                message: 'Missing required fields: title, youtube_url, chapter_id, lecture_number' 
+                message: 'Missing required fields: title, youtube_url, chapter_id' 
             });
         }
 
@@ -1286,18 +1414,30 @@ export const createLecture = async (req, res) => {
             return res.status(404).json({ message: 'Chapter not found' });
         }
 
-        // Check if lecture number already exists in this chapter
-        const existingLecture = await prisma.lecture.findFirst({
-            where: {
-                chapter_id: parseInt(chapter_id),
-                lecture_number: parseInt(lecture_number)
-            }
-        });
-
-        if (existingLecture) {
-            return res.status(400).json({ 
-                message: 'Lecture number already exists in this chapter' 
+        // Determine lecture number
+        let finalLectureNumber = lecture_number;
+        
+        if (!finalLectureNumber) {
+            // Auto-assign the next available lecture number
+            const lastLecture = await prisma.lecture.findFirst({
+                where: { chapter_id: parseInt(chapter_id) },
+                orderBy: { lecture_number: 'desc' }
             });
+            finalLectureNumber = lastLecture ? lastLecture.lecture_number + 1 : 1;
+        } else {
+            // Check if lecture number already exists in this chapter
+            const existingLecture = await prisma.lecture.findFirst({
+                where: {
+                    chapter_id: parseInt(chapter_id),
+                    lecture_number: parseInt(lecture_number)
+                }
+            });
+
+            if (existingLecture) {
+                return res.status(400).json({ 
+                    message: 'Lecture number already exists in this chapter' 
+                });
+            }
         }
 
         // Try to get duration from YouTube if not provided
@@ -1332,7 +1472,7 @@ export const createLecture = async (req, res) => {
                     youtube_url,
                     duration: durationInSeconds,
                     chapter_id: parseInt(chapter_id),
-                    lecture_number: parseInt(lecture_number)
+                    lecture_number: parseInt(finalLectureNumber)
                 }
             });
 
@@ -1445,6 +1585,53 @@ export const deleteLecture = async (req, res) => {
         res.json({ message: 'Lecture deleted successfully' });
     } catch (error) {
         console.error('Delete lecture error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+
+export const reorderLectures = async (req, res) => {
+    try {
+        const { chapterId, lectureOrders } = req.body;
+
+        if (!chapterId || !lectureOrders || !Array.isArray(lectureOrders)) {
+            return res.status(400).json({ message: 'Chapter ID and lecture orders array are required' });
+        }
+
+        // Update lecture numbers in transaction using temporary numbering to avoid conflicts
+        await prisma.$transaction(async (tx) => {
+            const chapterIdInt = parseInt(chapterId);
+            
+            // First, set all lectures to temporary negative numbers to avoid conflicts
+            for (let i = 0; i < lectureOrders.length; i++) {
+                const order = lectureOrders[i];
+                await tx.lecture.update({
+                    where: { 
+                        id: parseInt(order.id),
+                        chapter_id: chapterIdInt
+                    },
+                    data: { 
+                        lecture_number: -(i + 1) // Temporary negative number
+                    }
+                });
+            }
+            
+            // Then, update to the final positive numbers
+            for (const order of lectureOrders) {
+                await tx.lecture.update({
+                    where: { 
+                        id: parseInt(order.id),
+                        chapter_id: chapterIdInt
+                    },
+                    data: { 
+                        lecture_number: parseInt(order.lecture_number) 
+                    }
+                });
+            }
+        });
+
+        res.json({ message: 'Lectures reordered successfully' });
+    } catch (error) {
+        console.error('Reorder lectures error:', error);
         res.status(500).json({ message: 'Server error' });
     }
 };
