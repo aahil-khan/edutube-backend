@@ -412,11 +412,11 @@ const searchLectures = async (query, filters, offset, limit, sortBy, sortOrder) 
         const whereConditions = [];
         const searchTerms = [];
 
-        // Full-text search on lecture data
+        // Full-text search on lecture data including tags
         if (query) {
             const tsQuery = createTsQuery(query);
             whereConditions.push(`(
-                to_tsvector('english', l.title || ' ' || COALESCE(l.description, '') || ' ' || c.name || ' ' || ct.name) 
+                to_tsvector('english', l.title || ' ' || COALESCE(l.description, '') || ' ' || c.name || ' ' || ct.name || ' ' || COALESCE(string_agg(DISTINCT lt.tag, ' '), '')) 
                 @@ to_tsquery('english', $${searchTerms.length + 1})
             )`);
             searchTerms.push(tsQuery);
@@ -438,12 +438,22 @@ const searchLectures = async (query, filters, offset, limit, sortBy, sortOrder) 
             searchTerms.push(`%${filters.chapterName}%`);
         }
 
+        // Tags filter - search in tags as keywords
+        if (filters.tags) {
+            const tagsQuery = createTsQuery(filters.tags);
+            whereConditions.push(`(
+                to_tsvector('english', string_agg(DISTINCT lt.tag, ' ')) 
+                @@ to_tsquery('english', $${searchTerms.length + 1})
+            )`);
+            searchTerms.push(tagsQuery);
+        }
+
         const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
         
         // Build ORDER BY clause
         let orderClause = 'ORDER BY ';
         if (sortBy === 'relevance' && query) {
-            orderClause += `ts_rank(to_tsvector('english', l.title || ' ' || COALESCE(l.description, '') || ' ' || c.name || ' ' || ct.name), to_tsquery('english', $1)) DESC`;
+            orderClause += `ts_rank(to_tsvector('english', l.title || ' ' || COALESCE(l.description, '') || ' ' || c.name || ' ' || ct.name || ' ' || COALESCE(string_agg(DISTINCT lt.tag, ' '), '')), to_tsquery('english', $1)) DESC`;
         } else if (sortBy === 'name') {
             orderClause += `l.title ${sortOrder.toUpperCase()}`;
         } else {
@@ -467,17 +477,19 @@ const searchLectures = async (query, filters, offset, limit, sortBy, sortOrder) 
                 ct.course_code,
                 u.name as teacher_name,
                 COUNT(DISTINCT wh.id) as watch_count,
-                ${query ? `ts_rank(to_tsvector('english', l.title || ' ' || COALESCE(l.description, '') || ' ' || c.name || ' ' || ct.name), to_tsquery('english', $1)) as relevance_score` : '0 as relevance_score'}
+                string_agg(DISTINCT lt.tag, ', ') as tags,
+                ${query ? `ts_rank(to_tsvector('english', l.title || ' ' || COALESCE(l.description, '') || ' ' || c.name || ' ' || ct.name || ' ' || COALESCE(string_agg(DISTINCT lt.tag, ' '), '')), to_tsquery('english', $1)) as relevance_score` : '0 as relevance_score'}
             FROM lectures l
             JOIN chapters c ON l.chapter_id = c.id
             JOIN course_instances ci ON c.course_instance_id = ci.id
             JOIN course_templates ct ON ci.course_template_id = ct.id
             JOIN teachers t ON ci.teacher_id = t.id
             JOIN users u ON t.user_id = u.id
+            LEFT JOIN lecture_tags lt ON l.id = lt.lecture_id
             LEFT JOIN watch_history wh ON l.id = wh.lecture_id
-            ${whereClause}
             GROUP BY l.id, l.title, l.description, l.youtube_url, l.duration, l.lecture_number, l.created_at,
                      c.id, c.name, c.number, ci.id, ct.name, ct.course_code, u.name
+            ${whereConditions.length > 0 ? `HAVING ${whereConditions.join(' AND ')}` : ''}
             ${orderClause}
             LIMIT $${searchTerms.length + 1} OFFSET $${searchTerms.length + 2}
         `;
@@ -490,7 +502,9 @@ const searchLectures = async (query, filters, offset, limit, sortBy, sortOrder) 
             JOIN course_templates ct ON ci.course_template_id = ct.id
             JOIN teachers t ON ci.teacher_id = t.id
             JOIN users u ON t.user_id = u.id
-            ${whereClause}
+            LEFT JOIN lecture_tags lt ON l.id = lt.lecture_id
+            GROUP BY l.id, c.id, ci.id, ct.id, t.id, u.id
+            ${whereConditions.length > 0 ? `HAVING ${whereConditions.join(' AND ')}` : ''}
         `;
 
         const [dataResult, countResult] = await Promise.all([
@@ -518,6 +532,7 @@ const searchLectures = async (query, filters, offset, limit, sortBy, sortOrder) 
                 course_code: lecture.course_code,
                 teacher_name: lecture.teacher_name,
                 watch_count: parseInt(lecture.watch_count),
+                tags: lecture.tags || '', // Include tags in the response
                 relevance_score: parseFloat(lecture.relevance_score),
                 created_at: lecture.created_at
             })),
@@ -593,8 +608,10 @@ export const quickSearch = async (req, res) => {
                 JOIN chapters c ON l.chapter_id = c.id
                 JOIN course_instances ci ON c.course_instance_id = ci.id
                 JOIN course_templates ct ON ci.course_template_id = ct.id
-                WHERE to_tsvector('english', l.title || ' ' || COALESCE(l.description, '')) @@ to_tsquery('english', $1)
-                ORDER BY ts_rank(to_tsvector('english', l.title || ' ' || COALESCE(l.description, '')), to_tsquery('english', $1)) DESC
+                LEFT JOIN lecture_tags lt ON l.id = lt.lecture_id
+                WHERE to_tsvector('english', l.title || ' ' || COALESCE(l.description, '') || ' ' || COALESCE(string_agg(DISTINCT lt.tag, ' '), '')) @@ to_tsquery('english', $1)
+                GROUP BY l.id, l.title, c.name, ct.course_code
+                ORDER BY ts_rank(to_tsvector('english', l.title || ' ' || COALESCE(l.description, '') || ' ' || COALESCE(string_agg(DISTINCT lt.tag, ' '), '')), to_tsquery('english', $1)) DESC
                 LIMIT $2
             `, tsQuery, Math.ceil(limit / 3))
         ]);
