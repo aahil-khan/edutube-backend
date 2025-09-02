@@ -194,8 +194,8 @@ export const highlightSearchTerms = (text, searchQuery) => {
  * @param {object} params - Search parameters
  * @returns {object} - Validation result
  */
-export const validateSearchParams = (params) => {
-    const { query, type, page, limit, filters } = params;
+export const validateSearchParams = async (params) => {
+    const { query, type, page, limit, filters } = await params;
     const errors = [];
     
     // Validate query
