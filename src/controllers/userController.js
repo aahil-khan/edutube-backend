@@ -50,12 +50,12 @@ export const getStudentEnrolledCourses = async (req, res) => {
             include: {
                 course_instance: {
                     include: {
-                        course_template: true
-                    }
-                },
-                teacher: {
-                    include: {
-                        user: true
+                        course_template: true,
+                        teacher: {
+                            include: {
+                                user: true
+                            }
+                        }
                     }
                 }
             }
@@ -66,9 +66,9 @@ export const getStudentEnrolledCourses = async (req, res) => {
         } else {
             const coursesData = enrolledCourses.map(enrollment => ({
                 course_instance_id: enrollment.course_instance.id,
-                teacher_id: enrollment.teacher.id,
+                teacher_id: enrollment.course_instance.teacher.id,
                 course_name: enrollment.course_instance.course_template.name,
-                teacher_name: enrollment.teacher.user.name
+                teacher_name: enrollment.course_instance.teacher.user.name
             }));
 
             // await redisClient.set(cacheKey, JSON.stringify(coursesData), { EX: 3600 });
@@ -103,20 +103,21 @@ export const getUserData = async (req, res) => {
             include: {
                 course_instance: {
                     include: {
-                        course_template: true
-                    }
-                },
-                teacher: {
-                    include: {
-                        user: true
+                        course_template: true,
+                        teacher: {
+                            include: {
+                                user: true
+                            }
+                        }
                     }
                 }
             }
         });
 
         const coursesData = enrolledCourses.map(enrollment => ({
-            teacher_id: enrollment.teacher.id,
-            teacher_name: enrollment.teacher.user.name,
+            course_instance_id: enrollment.course_instance.id,
+            teacher_id: enrollment.course_instance.teacher.id,
+            teacher_name: enrollment.course_instance.teacher.user.name,
             course_name: enrollment.course_instance.course_template.name,
             course_code: enrollment.course_instance.course_template.course_code
         }));

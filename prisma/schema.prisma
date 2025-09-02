@@ -36,7 +36,6 @@ model Teacher {
   // Relations
   user             User             @relation(fields: [user_id], references: [id], onDelete: Cascade)
   course_instances CourseInstance[] // One-to-many: Teacher creates multiple course instances
-  enrollments      Enrollment[]     // One-to-many: Enrollments in teacher's courses
   
   @@map("teachers")
 }
@@ -96,14 +95,12 @@ model Enrollment {
   id                 Int      @id @default(autoincrement())
   student_id         Int      // Foreign key to user (student)
   course_instance_id Int      // Foreign key to course instance
-  teacher_id         Int      // Foreign key to teacher (for easier queries)
   created_at         DateTime @default(now())
   updated_at         DateTime @updatedAt
   
   // Relations
   student         User           @relation(fields: [student_id], references: [id], onDelete: Cascade)
   course_instance CourseInstance @relation(fields: [course_instance_id], references: [id], onDelete: Cascade)
-  teacher         Teacher        @relation(fields: [teacher_id], references: [id], onDelete: Cascade)
   
   @@unique([student_id, course_instance_id]) // A student can only enroll once per course instance
   @@map("enrollments")
