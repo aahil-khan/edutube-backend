@@ -1,6 +1,7 @@
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import prisma from '../config/db.js';
+import { redisHelpers } from '../config/redis.js';
 
 const ACCESS_SECRET_KEY = process.env.ACCESS_SECRET_KEY;
 const REFRESH_SECRET_KEY = process.env.REFRESH_SECRET_KEY;
@@ -46,6 +47,24 @@ export const login = async (req, res) => {
             maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
         });
 
+        // Store user session in Redis
+        const sessionData = {
+            userId: user.id,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+            loginTime: new Date().toISOString()
+        };
+        await redisHelpers.setSession(user.id.toString(), sessionData, 86400); // 24 hours
+
+        // Cache user data for quick access
+        await redisHelpers.setCache(`user:${user.id}`, {
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            role: user.role
+        }, 3600); // 1 hour
+
         res.json({
             success: true,
             accessToken,
@@ -85,7 +104,24 @@ export const refreshToken = (req, res) => {
     });
 };
 
-export const logout = (req, res) => {
+export const logout = async (req, res) => {
+    const refreshToken = req.cookies.refreshToken;
+    
+    if (refreshToken) {
+        try {
+            // Decode token to get user ID
+            const decoded = jwt.verify(refreshToken, REFRESH_SECRET_KEY);
+            
+            // Clear session from Redis
+            await redisHelpers.deleteSession(decoded.id.toString());
+            
+            // Clear user cache
+            await redisHelpers.deleteCache(`user:${decoded.id}`);
+        } catch (error) {
+            console.error('Error clearing session on logout:', error);
+        }
+    }
+    
     res.clearCookie('refreshToken');
     res.clearCookie('accessToken');
     res.json({ message: 'Logout successful' });

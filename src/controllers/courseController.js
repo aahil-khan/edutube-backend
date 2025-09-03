@@ -1,4 +1,5 @@
 import prisma from '../config/db.js';
+import { redisHelpers } from '../config/redis.js';
 
 export const getCoursesByTeacher = async (req, res) => {
     const teacherId = parseInt(req.params.id);
@@ -6,6 +7,16 @@ export const getCoursesByTeacher = async (req, res) => {
     if (isNaN(teacherId)) {
         return res.status(400).json({ message: 'Invalid teacher ID' });
     }
+
+    // Check cache first
+    const cacheKey = `teacher:courses:${teacherId}`;
+    const cachedData = await redisHelpers.getCache(cacheKey);
+    if (cachedData) {
+        console.log(`✅ REDIS HIT: Returning cached teacher courses for teacher ID: ${teacherId}`);
+        return res.json(cachedData);
+    }
+    
+    console.log(`❌ REDIS MISS: Cache not found, fetching teacher courses from database for ID: ${teacherId}`);
   
     try {
         const teacher = await prisma.teacher.findUnique({
@@ -44,14 +55,20 @@ export const getCoursesByTeacher = async (req, res) => {
             return res.status(404).json({ message: 'No course instances found for this teacher' });
         }
 
-        res.json({
+        const responseData = {
             teacher_info: {
                 id: teacher.id,
                 name: teacher.user.name,
                 email: teacher.user.email
             },
             course_instances: teacher.course_instances
-        });
+        };
+
+        // Cache for 10 minutes
+        const cacheSuccess = await redisHelpers.setCache(cacheKey, responseData, 600);
+        console.log(`✅ REDIS CACHE: Teacher courses ${cacheSuccess ? 'successfully cached' : 'failed to cache'} for teacher ID: ${teacherId}`);
+
+        res.json(responseData);
     } catch (error) {
         console.error('Error fetching course instances:', error);
         res.status(500).send('Server error');
@@ -60,6 +77,14 @@ export const getCoursesByTeacher = async (req, res) => {
 
 // Get all available courses for browsing
 export const getAllCoursesForBrowsing = async (req, res) => {
+    // Check cache first
+    const cacheKey = 'courses:browse:all';
+    const cachedData = await redisHelpers.getCache(cacheKey);
+    if (cachedData) {
+        console.log('Returning cached browse courses');
+        return res.json(cachedData);
+    }
+
     try {
         const courseInstances = await prisma.courseInstance.findMany({
             include: {
@@ -120,6 +145,9 @@ export const getAllCoursesForBrowsing = async (req, res) => {
             };
         });
 
+        // Cache for 5 minutes
+        await redisHelpers.setCache(cacheKey, courses, 300);
+
         res.json(courses);
     } catch (error) {
         console.error('Error fetching courses for browsing:', error);
@@ -133,6 +161,14 @@ export const getCourseInstanceById = async (req, res) => {
   
     if (isNaN(courseInstanceId)) {
         return res.status(400).json({ message: 'Invalid course instance ID' });
+    }
+
+    // Check cache first
+    const cacheKey = `course:${courseInstanceId}`;
+    const cachedData = await redisHelpers.getCache(cacheKey);
+    if (cachedData) {
+        console.log('Returning cached course data');
+        return res.json(cachedData);
     }
   
     try {
@@ -193,6 +229,9 @@ export const getCourseInstanceById = async (req, res) => {
                 duration: lecture.duration
             }))
         }));
+
+        // Cache for 10 minutes
+        await redisHelpers.setCache(cacheKey, chaptersData, 600);
 
         res.json(chaptersData);
     } catch (error) {

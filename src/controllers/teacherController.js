@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { redisHelpers } from '../config/redis.js';
 
 const prisma = new PrismaClient();
 
@@ -10,6 +11,14 @@ export const getTeacherById = async (req, res) => {
 
         if (isNaN(teacherId)) {
             return res.status(400).json({ message: 'Invalid teacher ID' });
+        }
+
+        // Check cache first
+        const cacheKey = `teacher:details:${teacherId}`;
+        const cachedData = await redisHelpers.getCache(cacheKey);
+        if (cachedData) {
+            console.log('Returning cached teacher details');
+            return res.json(cachedData);
         }
 
         // Get teacher details with user info and all course instances
@@ -120,6 +129,9 @@ export const getTeacherById = async (req, res) => {
             courses
         };
 
+        // Cache for 15 minutes
+        await redisHelpers.setCache(cacheKey, response, 900);
+
         res.json(response);
     } catch (error) {
         console.error('Error fetching teacher details:', error);
@@ -135,6 +147,14 @@ export const getAllTeachersPublic = async (req, res) => {
     try {
         const { page = 1, limit = 12, search } = req.query;
         const offset = (page - 1) * limit;
+
+        // Create cache key based on search parameters
+        const cacheKey = `teachers:public:${page}:${limit}:${search || 'all'}`;
+        const cachedData = await redisHelpers.getCache(cacheKey);
+        if (cachedData) {
+            console.log('Returning cached teachers list');
+            return res.json(cachedData);
+        }
 
         let whereCondition = {};
         if (search) {
@@ -204,7 +224,7 @@ export const getAllTeachersPublic = async (req, res) => {
             })
         );
 
-        res.json({
+        const responseData = {
             teachers: teachersWithStats,
             pagination: {
                 currentPage: parseInt(page),
@@ -212,7 +232,12 @@ export const getAllTeachersPublic = async (req, res) => {
                 totalCount,
                 hasMore: offset + teachers.length < totalCount
             }
-        });
+        };
+
+        // Cache for 5 minutes
+        await redisHelpers.setCache(cacheKey, responseData, 300);
+
+        res.json(responseData);
     } catch (error) {
         console.error('Error fetching teachers:', error);
         res.status(500).json({ 

@@ -1,5 +1,5 @@
 import prisma from '../config/db.js';
-// import redisClient from '../config/redis.js';
+import { redisHelpers } from '../config/redis.js';
 
 /**
  * Advanced search using PostgreSQL Full-Text Search with fuzzy matching
@@ -18,6 +18,18 @@ export const advancedSearch = async (req, res) => {
         } = req.body;
 
         console.log('Advanced search request:', { query, type, page, limit, filters, sortBy, sortOrder });
+
+        // Create cache key based on search parameters
+        const cacheKey = `search:${type}:${query}:${page}:${limit}:${JSON.stringify(filters)}:${sortBy}:${sortOrder}`;
+        
+        // Try to get cached results first
+        const cachedResults = await redisHelpers.getCache(cacheKey);
+        if (cachedResults) {
+            console.log('✅ REDIS HIT: Returning cached search results for:', query);
+            return res.json(cachedResults);
+        }
+
+        console.log('❌ REDIS MISS: Cache not found, executing database search for:', query);
 
         const offset = (page - 1) * limit;
         const searchQuery = query.trim();
@@ -86,6 +98,11 @@ export const advancedSearch = async (req, res) => {
         }
 
         console.log(`Search completed: ${results.totalCount} results found`);
+        
+        // Cache the results for 5 minutes (300 seconds)
+        const cacheSuccess = await redisHelpers.setCache(cacheKey, results, 300);
+        console.log(`✅ REDIS CACHE: Search results ${cacheSuccess ? 'successfully cached' : 'failed to cache'}`);
+        
         res.json(results);
 
     } catch (error) {

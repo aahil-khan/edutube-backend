@@ -23,17 +23,31 @@ export const fetchPlaylistVideos = async (playlistId) => {
             throw new Error('YouTube API key not configured');
         }
 
-        // Fetch playlist items
-        const playlistResponse = await axios.get(`https://www.googleapis.com/youtube/v3/playlistItems`, {
-            params: {
-                part: 'snippet',
-                playlistId: playlistId,
-                maxResults: 50,
-                key: API_KEY
-            }
-        });
+        let allPlaylistItems = [];
+        let nextPageToken = null;
+        
+        // Fetch all playlist items with pagination
+        do {
+            const playlistResponse = await axios.get(`https://www.googleapis.com/youtube/v3/playlistItems`, {
+                params: {
+                    part: 'snippet',
+                    playlistId: playlistId,
+                    maxResults: 50, // YouTube API max is 50 for playlistItems
+                    key: API_KEY,
+                    ...(nextPageToken && { pageToken: nextPageToken })
+                }
+            });
 
-        if (!playlistResponse.data.items || playlistResponse.data.items.length === 0) {
+            if (!playlistResponse.data.items) {
+                break;
+            }
+
+            allPlaylistItems = [...allPlaylistItems, ...playlistResponse.data.items];
+            nextPageToken = playlistResponse.data.nextPageToken;
+            
+        } while (nextPageToken);
+
+        if (allPlaylistItems.length === 0) {
             return {
                 success: false,
                 error: 'No videos found in playlist or playlist is private',
@@ -41,33 +55,40 @@ export const fetchPlaylistVideos = async (playlistId) => {
             };
         }
 
-        const videoIds = playlistResponse.data.items.map(item => 
-            item.snippet.resourceId.videoId
-        ).join(',');
+        // Process video IDs in batches (YouTube API allows max 50 video IDs per request)
+        const videos = [];
+        const batchSize = 50;
+        
+        for (let i = 0; i < allPlaylistItems.length; i += batchSize) {
+            const batch = allPlaylistItems.slice(i, i + batchSize);
+            const videoIds = batch.map(item => item.snippet.resourceId.videoId).join(',');
 
-        // Fetch video details for duration
-        const videosResponse = await axios.get(`https://www.googleapis.com/youtube/v3/videos`, {
-            params: {
-                part: 'contentDetails,snippet',
-                id: videoIds,
-                key: API_KEY
-            }
-        });
+            // Fetch video details for duration
+            const videosResponse = await axios.get(`https://www.googleapis.com/youtube/v3/videos`, {
+                params: {
+                    part: 'contentDetails,snippet',
+                    id: videoIds,
+                    key: API_KEY
+                }
+            });
 
-        const videos = playlistResponse.data.items.map((item, index) => {
-            const videoDetails = videosResponse.data.items.find(v => 
-                v.id === item.snippet.resourceId.videoId
-            );
-            
-            return {
-                id: { videoId: item.snippet.resourceId.videoId },
-                snippet: {
-                    ...item.snippet,
-                    thumbnails: videoDetails?.snippet?.thumbnails || item.snippet.thumbnails
-                },
-                contentDetails: videoDetails?.contentDetails || { duration: 'PT0S' }
-            };
-        });
+            const batchVideos = batch.map((item, index) => {
+                const videoDetails = videosResponse.data.items.find(v => 
+                    v.id === item.snippet.resourceId.videoId
+                );
+                
+                return {
+                    id: { videoId: item.snippet.resourceId.videoId },
+                    snippet: {
+                        ...item.snippet,
+                        thumbnails: videoDetails?.snippet?.thumbnails || item.snippet.thumbnails
+                    },
+                    contentDetails: videoDetails?.contentDetails || { duration: 'PT0S' }
+                };
+            });
+
+            videos.push(...batchVideos);
+        }
 
         return {
             success: true,

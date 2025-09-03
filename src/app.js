@@ -3,6 +3,9 @@ import dotenv from 'dotenv';
 import corsMiddleware from './middleware/cors.js';
 import { globalErrorHandler } from './utils/errorHandler.js';
 
+// Initialize Redis connection
+import './config/redis.js';
+
 // Routes
 import authRoutes from './routes/authRoutes.js';
 import userRoutes from './routes/userRoutes.js';
@@ -12,6 +15,7 @@ import searchRoutes from './routes/searchRoutes.js';
 import watchHistoryRoutes from './routes/watchHistoryRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import teacherRoutes from './routes/teacherRoutes.js';
+import redisRoutes from './routes/redisRoutes.js';
 
 dotenv.config();
 
@@ -32,6 +36,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/enrollment', enrollmentRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/redis', redisRoutes);
 app.use('/api', teacherRoutes);
 app.use('/api', courseRoutes);
 app.use('/api', searchRoutes);
