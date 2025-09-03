@@ -7,21 +7,28 @@ const router = express.Router();
 router.get('/health', async (req, res) => {
     try {
         // Test Redis connection
-        await redisClient.ping();
+        const pingResult = await redisClient.ping();
         
         // Get some basic Redis info
         const info = await redisClient.info();
-        const memory = await redisClient.memory('usage');
+        const dbSize = await redisClient.dbSize();
+        
+        // Test basic operations
+        const testKey = 'health_test';
+        await redisClient.set(testKey, 'test_value', { EX: 10 });
+        const testValue = await redisClient.get(testKey);
+        await redisClient.del(testKey);
         
         res.json({
             status: 'connected',
             message: 'Redis is working properly',
-            info: {
-                memory_usage: memory,
-                server_info: info.split('\r\n').slice(0, 5) // First 5 lines
-            }
+            ping: pingResult,
+            database_size: dbSize,
+            test_operation: testValue === 'test_value' ? 'success' : 'failed',
+            server_info: info.split('\r\n').slice(0, 5) // First 5 lines
         });
     } catch (error) {
+        console.error('Redis health check error:', error);
         res.status(500).json({
             status: 'error',
             message: 'Redis connection failed',
@@ -68,24 +75,83 @@ router.delete('/cache/:pattern', async (req, res) => {
 // Get cache statistics
 router.get('/stats', async (req, res) => {
     try {
-        const info = await redisClient.info('memory');
-        const keyspace = await redisClient.info('keyspace');
-        const stats = await redisClient.info('stats');
+        const info = await redisClient.info();
+        const dbSize = await redisClient.dbSize();
         
         // Get sample keys
         const keys = await redisClient.keys('*');
         const sampleKeys = keys.slice(0, 10);
         
+        // Group keys by prefix for better statistics
+        const keyStats = {};
+        keys.forEach(key => {
+            const prefix = key.split(':')[0];
+            keyStats[prefix] = (keyStats[prefix] || 0) + 1;
+        });
+        
         res.json({
-            memory_info: info,
-            keyspace_info: keyspace,
-            stats_info: stats,
+            status: 'success',
+            database_size: dbSize,
             total_keys: keys.length,
-            sample_keys: sampleKeys
+            key_distribution: keyStats,
+            sample_keys: sampleKeys,
+            server_info: info.split('\r\n').slice(0, 10),
+            timestamp: new Date().toISOString()
         });
     } catch (error) {
+        console.error('Redis stats error:', error);
         res.status(500).json({
             message: 'Failed to get Redis stats',
+            error: error.message
+        });
+    }
+});
+
+// Simple test endpoint to verify Redis operations
+router.get('/test', async (req, res) => {
+    try {
+        const testData = {
+            message: 'Redis test successful!',
+            timestamp: new Date().toISOString(),
+            random: Math.random()
+        };
+        
+        // Set cache with 30 second expiration
+        await redisHelpers.setCache('test_key', testData, 30);
+        
+        // Get it back
+        const retrieved = await redisHelpers.getCache('test_key');
+        
+        res.json({
+            status: 'success',
+            original: testData,
+            retrieved: retrieved,
+            match: JSON.stringify(testData) === JSON.stringify(retrieved)
+        });
+        
+    } catch (error) {
+        console.error('Redis test error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Redis test failed',
+            error: error.message
+        });
+    }
+});
+
+// Clear all cache (admin endpoint)
+router.delete('/clear-all', async (req, res) => {
+    try {
+        await redisClient.flushDb();
+        res.json({
+            status: 'success',
+            message: 'All cache cleared successfully',
+            timestamp: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error('Clear cache error:', error);
+        res.status(500).json({
+            message: 'Failed to clear cache',
             error: error.message
         });
     }

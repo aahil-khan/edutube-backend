@@ -590,14 +590,29 @@ export const quickSearch = async (req, res) => {
     try {
         const { query, limit = 5 } = req.query;
         
+        console.log('Quick search request:', { query, limit });
+        
         if (!query || query.trim().length < 2) {
             return res.json({ suggestions: [] });
         }
 
-        const tsQuery = createTsQuery(query);
+        // Check cache first
+        const cacheKey = `quicksearch:${query}:${limit}`;
+        const cachedResults = await redisHelpers.getCache(cacheKey);
+        if (cachedResults) {
+            console.log('✅ REDIS HIT: Returning cached quick search results');
+            return res.json(cachedResults);
+        }
+
+        console.log('❌ REDIS MISS: Executing quick search database queries');
+
+        const searchQuery = query.trim();
+        const tsQuery = createTsQuery(searchQuery);
+        
+        console.log('Generated tsQuery:', tsQuery);
         
         // Quick search across all entities for suggestions
-        const suggestions = await Promise.all([
+        const suggestions = await Promise.allSettled([
             // Teacher suggestions
             prisma.$queryRawUnsafe(`
                 SELECT 'teacher' as type, u.name as title, u.email as subtitle, t.id
@@ -618,27 +633,41 @@ export const quickSearch = async (req, res) => {
                 LIMIT $2
             `, tsQuery, Math.ceil(limit / 3)),
             
-            // Lecture suggestions
+            // Lecture suggestions - simplified query to avoid GROUP BY issues
             prisma.$queryRawUnsafe(`
                 SELECT 'lecture' as type, l.title, CONCAT(c.name, ' - ', ct.course_code) as subtitle, l.id
                 FROM lectures l
                 JOIN chapters c ON l.chapter_id = c.id
                 JOIN course_instances ci ON c.course_instance_id = ci.id
                 JOIN course_templates ct ON ci.course_template_id = ct.id
-                LEFT JOIN lecture_tags lt ON l.id = lt.lecture_id
-                WHERE to_tsvector('english', l.title || ' ' || COALESCE(l.description, '') || ' ' || COALESCE(string_agg(DISTINCT lt.tag, ' '), '')) @@ to_tsquery('english', $1)
-                GROUP BY l.id, l.title, c.name, ct.course_code
-                ORDER BY ts_rank(to_tsvector('english', l.title || ' ' || COALESCE(l.description, '') || ' ' || COALESCE(string_agg(DISTINCT lt.tag, ' '), '')), to_tsquery('english', $1)) DESC
+                WHERE to_tsvector('english', l.title || ' ' || COALESCE(l.description, '')) @@ to_tsquery('english', $1)
+                ORDER BY ts_rank(to_tsvector('english', l.title || ' ' || COALESCE(l.description, '')), to_tsquery('english', $1)) DESC
                 LIMIT $2
             `, tsQuery, Math.ceil(limit / 3))
         ]);
 
-        const allSuggestions = suggestions.flat().slice(0, limit);
+        // Filter successful results and flatten
+        const allSuggestions = suggestions
+            .filter(result => result.status === 'fulfilled')
+            .map(result => result.value)
+            .flat()
+            .slice(0, limit);
         
-        res.json({ suggestions: allSuggestions });
+        console.log(`Quick search completed: ${allSuggestions.length} suggestions found`);
+        
+        const response = { suggestions: allSuggestions };
+        
+        // Cache for 2 minutes
+        const cacheSuccess = await redisHelpers.setCache(cacheKey, response, 120);
+        console.log(`✅ REDIS CACHE: Quick search ${cacheSuccess ? 'successfully cached' : 'failed to cache'}`);
+        
+        res.json(response);
     } catch (error) {
         console.error('Error in quick search:', error);
-        res.status(500).json({ suggestions: [] });
+        res.status(500).json({ 
+            suggestions: [],
+            error: error.message 
+        });
     }
 };
 
