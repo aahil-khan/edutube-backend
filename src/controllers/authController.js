@@ -105,22 +105,22 @@ export const refreshToken = (req, res) => {
 };
 
 export const logout = async (req, res) => {
-    const refreshToken = req.cookies.refreshToken;
+    // const refreshToken = req.cookies.refreshToken;
     
-    if (refreshToken) {
-        try {
-            // Decode token to get user ID
-            const decoded = jwt.verify(refreshToken, REFRESH_SECRET_KEY);
+    // if (refreshToken) {
+    //     try {
+    //         // Decode token to get user ID
+    //         const decoded = jwt.verify(refreshToken, REFRESH_SECRET_KEY);
             
-            // Clear session from Redis
-            await redisHelpers.deleteSession(decoded.id.toString());
+    //         // Clear session from Redis
+    //         await redisHelpers.deleteSession(decoded.id.toString());
             
-            // Clear user cache
-            await redisHelpers.deleteCache(`user:${decoded.id}`);
-        } catch (error) {
-            console.error('Error clearing session on logout:', error);
-        }
-    }
+    //         // Clear user cache
+    //         await redisHelpers.deleteCache(`user:${decoded.id}`);
+    //     } catch (error) {
+    //         console.error('Error clearing session on logout:', error);
+    //     }
+    // }
     
     res.clearCookie('refreshToken');
     res.clearCookie('accessToken');
