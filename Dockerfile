@@ -25,6 +25,9 @@ RUN npx prisma generate
 # Copy source code
 COPY . .
 
+# Make startup script executable
+RUN chmod +x start.sh
+
 # Expose port 5001
 EXPOSE 5001
 
@@ -35,5 +38,5 @@ RUN groupadd -r nodejs && useradd -r -g nodejs backend
 RUN chown -R backend:nodejs /app
 USER backend
 
-# Start the application
-CMD ["npm", "start"]
+# Start the application with setup
+CMD ["./start.sh"]

@@ -11,7 +11,9 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
     "seed": "node scripts/seed.js",
-    "search:indexes": "node scripts/applySearchIndexes.js"
+    "search:indexes": "node scripts/applySearchIndexes.js",
+    "setup:admin": "node scripts/setupDefaultAdmin.js",
+    "setup:production": "npm run prisma:generate && npm run setup:admin"
   },
   "author": "",
   "license": "ISC",
