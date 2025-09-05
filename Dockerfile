@@ -1,5 +1,11 @@
-# Use Node.js 18 Alpine for smaller image size
-FROM node:18-alpine
+# Use Node.js 18 Debian-based image for better Prisma compatibility
+FROM node:18-slim
+
+# Install OpenSSL and other dependencies needed for Prisma
+RUN apt-get update && apt-get install -y \
+    openssl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
@@ -23,8 +29,7 @@ COPY . .
 EXPOSE 5001
 
 # Create a non-root user
-RUN addgroup -g 1001 -S nodejs
-RUN adduser -S backend -u 1001
+RUN groupadd -r nodejs && useradd -r -g nodejs backend
 
 # Change ownership of the app directory
 RUN chown -R backend:nodejs /app

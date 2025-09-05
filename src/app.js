@@ -31,6 +31,15 @@ app.get("/", (req, res) => {
   res.json({message:"Hello from Edutube!"});
 });
 
+// Health check endpoint for Docker health checks
+app.get("/health", (req, res) => {
+  res.json({
+    status: "healthy",
+    timestamp: new Date().toISOString(),
+    message: "EduTube backend is running"
+  });
+});
+
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);

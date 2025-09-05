@@ -1,5 +1,11 @@
 # Development Dockerfile for Backend
-FROM node:18-alpine
+FROM node:18-slim
+
+# Install OpenSSL and other dependencies needed for Prisma
+RUN apt-get update && apt-get install -y \
+    openssl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
@@ -20,8 +26,7 @@ RUN npx prisma generate
 EXPOSE 5001
 
 # Create a non-root user
-RUN addgroup -g 1001 -S nodejs
-RUN adduser -S backend -u 1001
+RUN groupadd -r nodejs && useradd -r -g nodejs backend
 
 # Change ownership of the app directory
 RUN chown -R backend:nodejs /app
