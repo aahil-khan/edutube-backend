@@ -10,8 +10,8 @@ import prisma from '../src/config/db.js';
 
 const DEFAULT_ADMIN = {
     name: 'Admin User',
-    email: 'admin@gmail.com',
-    password: 'aahil',
+    email: 'admin@edutube.com',
+    password: 'admin123',
     role: 'admin'
 };
 
