@@ -6,6 +6,13 @@ echo "🚀 Starting EduTube Backend..."
 echo "⏳ Waiting for database connection..."
 sleep 5
 
+# Apply migrations before serving traffic (idempotent if already applied)
+echo "📦 Running database migrations..."
+if ! npx prisma migrate deploy; then
+    echo "❌ prisma migrate deploy failed"
+    exit 1
+fi
+
 # Setup default admin user
 echo "🔐 Setting up default admin user..."
 node scripts/setupDefaultAdmin.js || echo "Admin setup completed with warnings"

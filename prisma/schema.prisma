@@ -23,7 +23,8 @@ model User {
   teacher       Teacher?      // One-to-one: A user can be a teacher
   enrollments   Enrollment[]  // One-to-many: Student enrollments
   watchHistory  WatchHistory[] // One-to-many: Watch history
-  
+  cli_api_keys  CliApiKey[]    // API keys minted by this admin (optional)
+
   @@map("users")
 }
 
@@ -107,15 +108,17 @@ model Enrollment {
 }
 
 model Lecture {
-  id             Int            @id @default(autoincrement())
-  chapter_id     Int            // Foreign key to chapter
-  lecture_number Int            // Order within the chapter
-  title          String
-  description    String?
-  youtube_url    String
-  duration       Int            @default(0) // Duration in seconds
-  created_at     DateTime       @default(now())
-  updated_at     DateTime       @updatedAt
+  id               Int            @id @default(autoincrement())
+  chapter_id       Int            // Foreign key to chapter
+  lecture_number   Int            // Order within the chapter
+  title            String
+  description      String?
+  youtube_url      String
+  duration         Int            @default(0) // Duration in seconds
+  source           String         @default("admin") // admin | cli | playlist_import
+  youtube_video_id String?        @unique // YouTube video id for CLI idempotency / lookups
+  created_at       DateTime       @default(now())
+  updated_at       DateTime       @updatedAt
   
   // Relations
   chapter      Chapter        @relation(fields: [chapter_id], references: [id], onDelete: Cascade)
@@ -124,6 +127,22 @@ model Lecture {
   
   @@unique([chapter_id, lecture_number]) // Unique lecture number per chapter
   @@map("lectures")
+}
+
+model CliApiKey {
+  id                 Int       @id @default(autoincrement())
+  name               String
+  key_prefix         String    @unique // First 8 chars of key; used for O(1) lookup before bcrypt
+  key_hash           String
+  created_at         DateTime  @default(now())
+  created_by_user_id Int?
+  revoked_at         DateTime?
+  last_used_at       DateTime?
+  note               String?
+
+  created_by User? @relation(fields: [created_by_user_id], references: [id], onDelete: SetNull)
+
+  @@map("cli_api_keys")
 }
 
 model LectureTag {

@@ -41,6 +41,7 @@ import {
     fetchYouTubePlaylist,
     bulkImportLectures
 } from '../controllers/adminController.js';
+import { mintCliApiKey, listCliApiKeys, revokeCliApiKey } from '../controllers/cliApiKeyAdminController.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { requireAdmin } from '../middleware/adminAuth.js';
 
@@ -111,5 +112,10 @@ router.get('/students/dropdown', getStudentsForDropdown);
 // YouTube Playlist Import
 router.post('/youtube/fetch-playlist', fetchYouTubePlaylist);
 router.post('/youtube/bulk-import-lectures', bulkImportLectures);
+
+// CLI API keys (mint / list / revoke — plaintext shown once on mint)
+router.post('/cli-api-keys', mintCliApiKey);
+router.get('/cli-api-keys', listCliApiKeys);
+router.post('/cli-api-keys/:id/revoke', revokeCliApiKey);
 
 export default router;

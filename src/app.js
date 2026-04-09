@@ -14,8 +14,10 @@ import courseRoutes from './routes/courseRoutes.js';
 import searchRoutes from './routes/searchRoutes.js';
 import watchHistoryRoutes from './routes/watchHistoryRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
+import teacherPortalRoutes from './routes/teacherPortalRoutes.js';
 import teacherRoutes from './routes/teacherRoutes.js';
 import redisRoutes from './routes/redisRoutes.js';
+import cliRoutes from './routes/cliRoutes.js';
 
 dotenv.config();
 
@@ -45,6 +47,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/enrollment', enrollmentRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/teacher', teacherPortalRoutes);
+app.use('/api/cli', cliRoutes);
 app.use('/api/redis', redisRoutes);
 app.use('/api', teacherRoutes);
 app.use('/api', courseRoutes);
