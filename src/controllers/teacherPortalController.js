@@ -2,6 +2,13 @@ import prisma from '../config/db.js';
 
 const TEMP_HIGH = 2_000_000_000; // one slot for cross-chapter insert before final renumber
 
+/**
+ * WatchHistory.progress (0–100) at or above this fraction counts as one completion (per lecture analytics).
+ * Display copy in UI: "Completed (≥90%)".
+ */
+export const TEACHER_COMPLETION_THRESHOLD = 0.9;
+const COMPLETION_PROGRESS_MIN = TEACHER_COMPLETION_THRESHOLD * 100;
+
 async function assertLectureOwnedByTeacher(teacherId, lectureId) {
     const lecture = await prisma.lecture.findFirst({
         where: { id: lectureId },
@@ -456,6 +463,131 @@ export const moveLectureTeacher = async (req, res) => {
             return res.status(404).json({ message: error.message });
         }
         console.error('moveLectureTeacher error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+
+/**
+ * GET /api/teacher/instances/:id/analytics
+ * Ownership: CourseInstance must belong to req.teacher.id — otherwise 404 (no id leak).
+ */
+export const getInstanceAnalytics = async (req, res) => {
+    try {
+        const instanceId = parseInt(req.params.id, 10);
+        if (Number.isNaN(instanceId)) {
+            return res.status(400).json({ message: 'Invalid instance id' });
+        }
+
+        const inst = await assertInstanceOwnedByTeacher(req.teacher.id, instanceId);
+        if (!inst) {
+            return res.status(404).json({ message: 'Course instance not found' });
+        }
+
+        const [enrollment_count, chapter_count, lecture_count] = await Promise.all([
+            prisma.enrollment.count({ where: { course_instance_id: instanceId } }),
+            prisma.chapter.count({ where: { course_instance_id: instanceId } }),
+            prisma.lecture.count({
+                where: { chapter: { course_instance_id: instanceId } }
+            })
+        ]);
+
+        const activeRows = await prisma.$queryRaw`
+            SELECT COUNT(DISTINCT wh.user_id)::int AS c
+            FROM watch_history wh
+            INNER JOIN lectures l ON l.id = wh.lecture_id
+            INNER JOIN chapters c ON c.id = l.chapter_id
+            WHERE c.course_instance_id = ${instanceId}
+        `;
+        const active_students = activeRows[0]?.c ?? 0;
+
+        const lectureRows = await prisma.$queryRaw`
+            SELECT
+                l.id AS lecture_id,
+                l.title,
+                COALESCE((
+                    SELECT COUNT(DISTINCT wh.user_id)::int
+                    FROM watch_history wh
+                    WHERE wh.lecture_id = l.id
+                ), 0) AS students_with_progress,
+                COALESCE((
+                    SELECT AVG(wh.progress)
+                    FROM watch_history wh
+                    WHERE wh.lecture_id = l.id
+                ), 0) AS average_progress,
+                COALESCE((
+                    SELECT COUNT(*)::int
+                    FROM watch_history wh
+                    WHERE wh.lecture_id = l.id AND wh.progress >= ${COMPLETION_PROGRESS_MIN}
+                ), 0) AS completions
+            FROM lectures l
+            INNER JOIN chapters c ON c.id = l.chapter_id
+            WHERE c.course_instance_id = ${instanceId}
+            ORDER BY c.number ASC, l.lecture_number ASC
+        `;
+
+        const lectures = lectureRows.map((row) => ({
+            lecture_id: Number(row.lecture_id),
+            title: row.title,
+            students_with_progress: Number(row.students_with_progress),
+            average_progress:
+                row.average_progress != null
+                    ? Math.round(Number(row.average_progress) * 10) / 10
+                    : 0,
+            completions: Number(row.completions)
+        }));
+
+        res.json({
+            data: {
+                enrollment_count,
+                chapter_count,
+                lecture_count,
+                active_students: Number(active_students),
+                lectures
+            }
+        });
+    } catch (error) {
+        console.error('getInstanceAnalytics error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+
+/**
+ * GET /api/teacher/analytics/summary
+ */
+export const getAnalyticsSummary = async (req, res) => {
+    try {
+        const teacherId = req.teacher.id;
+
+        const rows = await prisma.$queryRaw`
+            SELECT
+                ci.id AS instance_id,
+                ci.instance_name,
+                ct.course_code,
+                (SELECT COUNT(*)::int FROM enrollments e WHERE e.course_instance_id = ci.id) AS enrollment_count,
+                COALESCE((
+                    SELECT COUNT(DISTINCT wh.user_id)::int
+                    FROM watch_history wh
+                    INNER JOIN lectures l ON l.id = wh.lecture_id
+                    INNER JOIN chapters c ON c.id = l.chapter_id
+                    WHERE c.course_instance_id = ci.id
+                ), 0) AS active_students
+            FROM course_instances ci
+            INNER JOIN course_templates ct ON ct.id = ci.course_template_id
+            WHERE ci.teacher_id = ${teacherId}
+            ORDER BY ci.created_at DESC
+        `;
+
+        const instances = rows.map((row) => ({
+            instance_id: Number(row.instance_id),
+            instance_name: row.instance_name,
+            course_code: row.course_code,
+            enrollment_count: Number(row.enrollment_count),
+            active_students: Number(row.active_students)
+        }));
+
+        res.json({ data: { instances } });
+    } catch (error) {
+        console.error('getAnalyticsSummary error:', error);
         res.status(500).json({ message: 'Server error' });
     }
 };

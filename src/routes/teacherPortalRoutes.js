@@ -4,6 +4,8 @@ import { requireTeacher } from '../middleware/teacherAuth.js';
 import {
     getMyInstances,
     getInstanceChapters,
+    getInstanceAnalytics,
+    getAnalyticsSummary,
     createChapterTeacher,
     updateChapterTeacher,
     reorderChaptersTeacher,
@@ -17,6 +19,8 @@ router.use(authenticateToken);
 router.use(requireTeacher);
 
 router.get('/my-instances', getMyInstances);
+router.get('/analytics/summary', getAnalyticsSummary);
+router.get('/instances/:id/analytics', getInstanceAnalytics);
 router.get('/instances/:id/chapters', getInstanceChapters);
 
 router.post('/chapters', createChapterTeacher);
