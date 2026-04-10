@@ -5,17 +5,21 @@ import prisma from '../config/db.js';
  * Sets req.teacher = { id, user_id, ... } for ownership checks in controllers.
  */
 export async function requireTeacher(req, res, next) {
-    if (!req.user) {
+    if (!req.actor) {
         return res.status(401).json({ message: 'Authentication required' });
     }
 
-    if (req.user.role !== 'teacher') {
+    if (req.authContext?.viewMode?.active) {
+        return res.status(403).json({ message: 'Exit student view mode to access teacher routes' });
+    }
+
+    if (req.actor.role !== 'teacher') {
         return res.status(403).json({ message: 'Teacher access required' });
     }
 
     try {
         const teacher = await prisma.teacher.findUnique({
-            where: { user_id: req.user.id }
+            where: { user_id: req.actor.id }
         });
 
         if (!teacher) {

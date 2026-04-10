@@ -115,6 +115,40 @@ export const redisHelpers = {
             console.error('Redis SESSION DELETE error:', error);
             return false;
         }
+    },
+
+    async setViewingMode(actorUserId, data, expireInSeconds = 86400) {
+        try {
+            await redisClient.setEx(
+                `viewmode:${actorUserId}`,
+                expireInSeconds,
+                JSON.stringify(data)
+            );
+            return true;
+        } catch (error) {
+            console.error('Redis VIEWMODE SET error:', error);
+            return false;
+        }
+    },
+
+    async getViewingMode(actorUserId) {
+        try {
+            const value = await redisClient.get(`viewmode:${actorUserId}`);
+            return value ? JSON.parse(value) : null;
+        } catch (error) {
+            console.error('Redis VIEWMODE GET error:', error);
+            return null;
+        }
+    },
+
+    async clearViewingMode(actorUserId) {
+        try {
+            await redisClient.del(`viewmode:${actorUserId}`);
+            return true;
+        } catch (error) {
+            console.error('Redis VIEWMODE DELETE error:', error);
+            return false;
+        }
     }
 };
 

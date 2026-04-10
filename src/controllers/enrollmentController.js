@@ -4,7 +4,7 @@ import prisma from '../config/db.js';
 export const enrollCourse = async (req, res) => {
     try {
         const { course_instance_id } = req.body;
-        const studentId = req.user.id; // Get from authenticated user
+        const studentId = req.user.id;
         
         // Verify the course instance exists
         const courseInstance = await prisma.courseInstance.findUnique({
@@ -44,7 +44,7 @@ export const enrollCourse = async (req, res) => {
 export const unenrollCourse = async (req, res) => {
     try {
         const { course_instance_id } = req.body;
-        const studentId = req.user.id; // Get from authenticated user
+        const studentId = req.user.id;
         
         console.log('Unenroll request:', { course_instance_id, studentId });
         
@@ -77,7 +77,7 @@ export const unenrollCourse = async (req, res) => {
 export const checkEnrollment = async (req, res) => {
     try {
         const { course_instance_id } = req.params;
-        const studentId = req.user.id; // Get from authenticated user
+        const studentId = req.user.id;
         
         const enrollment = await prisma.enrollment.findFirst({
             where: {

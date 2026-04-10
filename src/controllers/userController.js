@@ -169,7 +169,7 @@ export const getUserData = async (req, res) => {
 
 export const changePassword = async (req, res) => {
     const { oldPassword, newPassword } = req.body;
-    const userId = req.user.id;
+    const userId = req.actor?.id || req.user.id;
 
     try {
         const user = await prisma.user.findUnique({

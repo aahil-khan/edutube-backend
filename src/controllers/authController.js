@@ -5,6 +5,7 @@ import { redisHelpers } from '../config/redis.js';
 
 const ACCESS_SECRET_KEY = process.env.ACCESS_SECRET_KEY;
 const REFRESH_SECRET_KEY = process.env.REFRESH_SECRET_KEY;
+const STUDENT_PREVIEW_EMAIL = 'student@thapar.edu';
 
 export const login = async (req, res) => {
     console.log('Headers:', req.headers);
@@ -65,6 +66,9 @@ export const login = async (req, res) => {
             role: user.role
         }, 3600); // 1 hour
 
+        // Ensure no stale preview mode survives a fresh login.
+        await redisHelpers.clearViewingMode(user.id.toString());
+
         res.json({
             success: true,
             accessToken,
@@ -122,11 +126,122 @@ export const logout = async (req, res) => {
     //     }
     // }
     
+    const actorUserId = req.actor?.id || req.user?.id;
+    if (actorUserId) {
+        await redisHelpers.clearViewingMode(actorUserId.toString());
+    }
+
     res.clearCookie('refreshToken');
     res.clearCookie('accessToken');
     res.json({ message: 'Logout successful' });
 };
 
 export const verifyAuth = (req, res) => {
-    res.status(200).json({message:"token is valid", role:req.user.role});
+    const authContext = req.authContext || {
+        actor: req.actor,
+        effectiveUser: req.user,
+        viewMode: { active: false, type: null }
+    };
+
+    res.status(200).json({
+        message: 'token is valid',
+        role: authContext.effectiveUser.role,
+        actualRole: authContext.actor.role,
+        activeRole: authContext.effectiveUser.role,
+        name: authContext.effectiveUser.name,
+        actualName: authContext.actor.name,
+        id: authContext.effectiveUser.id,
+        actorId: authContext.actor.id,
+        actor: authContext.actor,
+        effectiveUser: authContext.effectiveUser,
+        viewMode: authContext.viewMode
+    });
+};
+
+export const startStudentViewMode = async (req, res) => {
+    try {
+        const actor = req.actor;
+
+        if (!actor || !['admin', 'teacher'].includes(actor.role)) {
+            return res.status(403).json({ message: 'Only admin/teacher can enable student view mode' });
+        }
+
+        const targetStudent = await prisma.user.findUnique({
+            where: { email: STUDENT_PREVIEW_EMAIL },
+            select: {
+                id: true,
+                name: true,
+                email: true,
+                role: true
+            }
+        });
+
+        if (!targetStudent || targetStudent.role !== 'student') {
+            return res.status(404).json({ message: 'Configured preview student account not found' });
+        }
+
+        const startedAt = new Date().toISOString();
+        await redisHelpers.setViewingMode(actor.id.toString(), {
+            type: 'student-account',
+            targetUserId: targetStudent.id,
+            targetUserName: targetStudent.name,
+            targetUserEmail: targetStudent.email,
+            startedAt
+        }, 86400);
+
+        return res.status(200).json({
+            message: 'Student view mode enabled',
+            role: 'student',
+            actualRole: actor.role,
+            activeRole: 'student',
+            actor,
+            effectiveUser: {
+                id: targetStudent.id,
+                name: targetStudent.name,
+                role: 'student'
+            },
+            viewMode: {
+                active: true,
+                type: 'student-account',
+                targetUserId: targetStudent.id,
+                targetUserName: targetStudent.name,
+                targetUserEmail: targetStudent.email,
+                startedAt
+            }
+        });
+    } catch (error) {
+        console.error('Start student view mode error:', error);
+        return res.status(500).json({ message: 'Server error' });
+    }
+};
+
+export const stopStudentViewMode = async (req, res) => {
+    try {
+        const actor = req.actor;
+        if (!actor) {
+            return res.status(401).json({ message: 'Authentication required' });
+        }
+
+        await redisHelpers.clearViewingMode(actor.id.toString());
+
+        return res.status(200).json({
+            message: 'Student view mode disabled',
+            role: actor.role,
+            actualRole: actor.role,
+            activeRole: actor.role,
+            actor,
+            effectiveUser: actor,
+            viewMode: {
+                active: false,
+                type: null,
+                targetUserId: null,
+                targetUserName: null,
+                targetUserEmail: null,
+                startedAt: null
+            }
+        });
+    } catch (error) {
+        console.error('Stop student view mode error:', error);
+        return res.status(500).json({ message: 'Server error' });
+    }
 };
