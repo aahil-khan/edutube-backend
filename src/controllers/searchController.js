@@ -615,10 +615,20 @@ export const quickSearch = async (req, res) => {
         const suggestions = await Promise.allSettled([
             // Teacher suggestions
             prisma.$queryRawUnsafe(`
-                SELECT 'teacher' as type, u.name as title, u.email as subtitle, t.id
+                SELECT
+                    'teacher' as type,
+                    u.name as title,
+                    u.email as subtitle,
+                    t.id,
+                    COUNT(ci.id)::int as course_count
                 FROM teachers t
                 JOIN users u ON t.user_id = u.id
+                LEFT JOIN course_instances ci
+                    ON ci.teacher_id = t.id
+                    AND ci.is_active = true
                 WHERE to_tsvector('english', u.name || ' ' || u.email) @@ to_tsquery('english', $1)
+                GROUP BY t.id, u.name, u.email
+                HAVING COUNT(ci.id) > 0
                 ORDER BY ts_rank(to_tsvector('english', u.name || ' ' || u.email), to_tsquery('english', $1)) DESC
                 LIMIT $2
             `, tsQuery, Math.ceil(limit / 3)),
