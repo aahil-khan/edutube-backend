@@ -213,7 +213,8 @@ export const getCourseInstanceById = async (req, res) => {
             title: chapter.name,
             description: chapter.description,
             course_name: courseInstance.course_template.name,
-            course_code: courseInstance.course_template.code,
+            course_code: courseInstance.course_template.course_code,
+            course_description: courseInstance.course_template.description,
             instructor_name: courseInstance.teacher.user.name,
             teacher_id: courseInstance.teacher.id, // Include teacher_id for enrollment
             lectures: chapter.lectures.map(lecture => ({

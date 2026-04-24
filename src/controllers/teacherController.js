@@ -148,17 +148,24 @@ export const getAllTeachersPublic = async (req, res) => {
         const { page = 1, limit = 12, search } = req.query;
         const offset = (page - 1) * limit;
 
-        // Create cache key based on search parameters
-        const cacheKey = `teachers:public:${page}:${limit}:${search || 'all'}`;
+        // Create cache key based on search parameters and filters
+        const cacheKey = `teachers:public:v2:active-courses-only:${page}:${limit}:${search || 'all'}`;
         const cachedData = await redisHelpers.getCache(cacheKey);
         if (cachedData) {
             console.log('Returning cached teachers list');
             return res.json(cachedData);
         }
 
-        let whereCondition = {};
+        let whereCondition = {
+            course_instances: {
+                some: {
+                    is_active: true
+                }
+            }
+        };
         if (search) {
             whereCondition = {
+                ...whereCondition,
                 user: {
                     name: {
                         contains: search,

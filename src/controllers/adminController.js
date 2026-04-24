@@ -100,13 +100,14 @@ export const getAllUsers = async (req, res) => {
     try {
         const { page = 1, limit = 10, role, search } = req.query;
         const skip = (page - 1) * limit;
+        const normalizedSearch = typeof search === 'string' ? search.trim() : '';
 
         const where = {};
         if (role && role !== 'all') where.role = role;
-        if (search) {
+        if (normalizedSearch) {
             where.OR = [
-                { name: { contains: search, mode: 'insensitive' } },
-                { email: { contains: search, mode: 'insensitive' } }
+                { name: { contains: normalizedSearch, mode: 'insensitive' } },
+                { email: { contains: normalizedSearch, mode: 'insensitive' } }
             ];
         }
 
@@ -651,16 +652,77 @@ export const deleteCourseTemplate = async (req, res) => {
 // Get all course instances
 export const getAllCourseInstances = async (req, res) => {
     try {
-        const { page = 1, limit = 10, teacher_id, course_template_id } = req.query;
+        const {
+            page = 1,
+            limit = 10,
+            teacher_id,
+            course_template_id,
+            search,
+            teacher_search,
+            course_search
+        } = req.query;
         const skip = (page - 1) * limit;
 
-        const where = {};
+        const normalizedSearch = typeof search === 'string' ? search.trim() : '';
+        const normalizedTeacherSearch = typeof teacher_search === 'string' ? teacher_search.trim() : '';
+        const normalizedCourseSearch = typeof course_search === 'string' ? course_search.trim() : '';
+
+        const andConditions = [];
         if (teacher_id && teacher_id !== 'all') {
-            where.teacher_id = parseInt(teacher_id);
+            andConditions.push({ teacher_id: parseInt(teacher_id) });
         }
         if (course_template_id && course_template_id !== 'all') {
-            where.course_template_id = parseInt(course_template_id);
+            andConditions.push({ course_template_id: parseInt(course_template_id) });
         }
+        if (normalizedSearch) {
+            andConditions.push({
+                OR: [
+                    { instance_name: { contains: normalizedSearch, mode: 'insensitive' } },
+                    {
+                        course_template: {
+                            OR: [
+                                { course_code: { contains: normalizedSearch, mode: 'insensitive' } },
+                                { name: { contains: normalizedSearch, mode: 'insensitive' } }
+                            ]
+                        }
+                    },
+                    {
+                        teacher: {
+                            user: {
+                                OR: [
+                                    { name: { contains: normalizedSearch, mode: 'insensitive' } },
+                                    { email: { contains: normalizedSearch, mode: 'insensitive' } }
+                                ]
+                            }
+                        }
+                    }
+                ]
+            });
+        }
+        if (normalizedTeacherSearch) {
+            andConditions.push({
+                teacher: {
+                    user: {
+                        OR: [
+                            { name: { contains: normalizedTeacherSearch, mode: 'insensitive' } },
+                            { email: { contains: normalizedTeacherSearch, mode: 'insensitive' } }
+                        ]
+                    }
+                }
+            });
+        }
+        if (normalizedCourseSearch) {
+            andConditions.push({
+                course_template: {
+                    OR: [
+                        { course_code: { contains: normalizedCourseSearch, mode: 'insensitive' } },
+                        { name: { contains: normalizedCourseSearch, mode: 'insensitive' } }
+                    ]
+                }
+            });
+        }
+
+        const where = andConditions.length > 0 ? { AND: andConditions } : {};
 
         const [instances, total] = await Promise.all([
             prisma.courseInstance.findMany({
