@@ -93,8 +93,10 @@ export const getUserData = async (req, res) => {
         const user = await prisma.user.findUnique({
             where: { id: userId },
             select: {
+                id: true,
                 name: true,
-                email: true
+                email: true,
+                avatar_variant: true
             }
         });
 
@@ -149,8 +151,10 @@ export const getUserData = async (req, res) => {
         }));
 
         const userData = { 
+            id: user.id,
             name: user.name, 
             email: user.email, 
+            avatar_variant: user.avatar_variant,
             enrolled_courses: coursesData,
             // Add watch history stats
             videos_watched: videosWatched,
@@ -164,6 +168,55 @@ export const getUserData = async (req, res) => {
     } catch (error) {
         console.error('Error fetching user data:', error);
         res.status(500).send('Server error');
+    }
+};
+
+export const getAvatarVariant = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const user = await prisma.user.findUnique({
+            where: { id: userId },
+            select: { avatar_variant: true }
+        });
+
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        res.json({ avatar_variant: user.avatar_variant || null });
+    } catch (error) {
+        console.error('Error fetching avatar variant:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+
+export const updateAvatarVariant = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const { avatar_variant } = req.body;
+
+        if (avatar_variant !== null && typeof avatar_variant !== 'string') {
+            return res.status(400).json({ message: 'avatar_variant must be a string or null' });
+        }
+
+        const nextVariant = avatar_variant ? avatar_variant.trim() : null;
+        if (nextVariant && (nextVariant.length < 2 || nextVariant.length > 40)) {
+            return res.status(400).json({ message: 'avatar_variant length is invalid' });
+        }
+
+        const updatedUser = await prisma.user.update({
+            where: { id: userId },
+            data: { avatar_variant: nextVariant },
+            select: { avatar_variant: true }
+        });
+
+        res.json({
+            message: 'Avatar updated successfully',
+            avatar_variant: updatedUser.avatar_variant
+        });
+    } catch (error) {
+        console.error('Error updating avatar variant:', error);
+        res.status(500).json({ message: 'Server error' });
     }
 };
 

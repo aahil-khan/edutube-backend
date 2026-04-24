@@ -4,7 +4,9 @@ import {
     getStudentEnrolledCourses, 
     getUserData, 
     changePassword, 
-    getDashboard 
+    getDashboard,
+    getAvatarVariant,
+    updateAvatarVariant
 } from '../controllers/userController.js';
 import { authenticateToken } from '../middleware/auth.js';
 
@@ -13,6 +15,8 @@ const router = express.Router();
 router.get('/student_details/:id', getStudentDetails);
 router.get('/student_enrolled_courses/:id', getStudentEnrolledCourses);
 router.get('/get-user-data', authenticateToken, getUserData);
+router.get('/avatar-variant', authenticateToken, getAvatarVariant);
+router.put('/avatar-variant', authenticateToken, updateAvatarVariant);
 router.post('/change-password', authenticateToken, changePassword);
 router.get('/dashboard', authenticateToken, getDashboard);
 
