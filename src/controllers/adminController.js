@@ -6,6 +6,7 @@ import {
     parseYouTubeDuration, 
     generateYouTubeUrl 
 } from '../utils/youtubeHelpers.js';
+import { cacheInvalidation } from '../utils/cacheInvalidation.js';
 
 // Helper function to extract YouTube video ID from URL
 const getYouTubeVideoId = (url) => {
@@ -536,6 +537,9 @@ export const createCourseTemplate = async (req, res) => {
             }
         });
 
+        await cacheInvalidation.invalidateSearchCache();
+        await cacheInvalidation.invalidateCourseCache(template.id).catch(() => {});
+
         res.status(201).json({ 
             message: 'Course template created successfully', 
             template 
@@ -576,6 +580,9 @@ export const updateCourseTemplate = async (req, res) => {
             data: updateData
         });
 
+        await cacheInvalidation.invalidateSearchCache();
+        await cacheInvalidation.invalidateCourseCache(template.id).catch(() => {});
+
         res.json({ message: 'Course template updated successfully', template });
     } catch (error) {
         if (error.code === 'P2002') {
@@ -593,11 +600,17 @@ export const deleteCourseTemplate = async (req, res) => {
     try {
         const { id } = req.params;
 
+        const templateId = parseInt(id);
+        const affectedInstances = await prisma.courseInstance.findMany({
+            where: { course_template_id: templateId },
+            select: { id: true, teacher_id: true }
+        });
+
         // Delete in transaction to maintain referential integrity
         await prisma.$transaction(async (tx) => {
             // Get all course instances for this template
             const instances = await tx.courseInstance.findMany({
-                where: { course_template_id: parseInt(id) },
+                where: { course_template_id: templateId },
                 include: { chapters: { include: { lectures: true } } }
             });
 
@@ -631,14 +644,22 @@ export const deleteCourseTemplate = async (req, res) => {
 
             // Delete course instances
             await tx.courseInstance.deleteMany({
-                where: { course_template_id: parseInt(id) }
+                where: { course_template_id: templateId }
             });
 
             // Delete the template
             await tx.courseTemplate.delete({
-                where: { id: parseInt(id) }
+                where: { id: templateId }
             });
         });
+
+        await cacheInvalidation.invalidateSearchCache();
+        await Promise.all([
+            cacheInvalidation.invalidateCourseCache(templateId).catch(() => {}),
+            ...affectedInstances.map((instance) =>
+                cacheInvalidation.invalidateCourseCache(instance.id, instance.teacher_id).catch(() => {})
+            )
+        ]);
 
         res.json({ message: 'Course template deleted successfully' });
     } catch (error) {
@@ -878,6 +899,10 @@ export const createCourseInstance = async (req, res) => {
             }
         });
 
+        await cacheInvalidation.invalidateCourseCache(instance.id, instance.teacher_id).catch(() => {});
+        await cacheInvalidation.invalidateTeacherCache(instance.teacher_id).catch(() => {});
+        await cacheInvalidation.invalidateSearchCache();
+
         res.status(201).json({ 
             message: 'Course instance created successfully', 
             instance 
@@ -926,6 +951,10 @@ export const updateCourseInstance = async (req, res) => {
             }
         });
 
+        await cacheInvalidation.invalidateCourseCache(instance.id, instance.teacher_id).catch(() => {});
+        await cacheInvalidation.invalidateTeacherCache(instance.teacher_id).catch(() => {});
+        await cacheInvalidation.invalidateSearchCache();
+
         res.json({ message: 'Course instance updated successfully', instance });
     } catch (error) {
         console.error('Update course instance error:', error);
@@ -937,12 +966,17 @@ export const updateCourseInstance = async (req, res) => {
 export const deleteCourseInstance = async (req, res) => {
     try {
         const { id } = req.params;
+        const instanceId = parseInt(id);
+        const existingInstance = await prisma.courseInstance.findUnique({
+            where: { id: instanceId },
+            select: { id: true, teacher_id: true }
+        });
 
         // Delete in transaction to maintain referential integrity
         await prisma.$transaction(async (tx) => {
             // Get all chapters for this instance
             const chapters = await tx.chapter.findMany({
-                where: { course_instance_id: parseInt(id) },
+                where: { course_instance_id: instanceId },
                 include: { lectures: true }
             });
 
@@ -966,19 +1000,25 @@ export const deleteCourseInstance = async (req, res) => {
 
             // Delete chapters
             await tx.chapter.deleteMany({
-                where: { course_instance_id: parseInt(id) }
+                where: { course_instance_id: instanceId }
             });
 
             // Delete enrollments
             await tx.enrollment.deleteMany({
-                where: { course_instance_id: parseInt(id) }
+                where: { course_instance_id: instanceId }
             });
 
             // Delete the instance
             await tx.courseInstance.delete({
-                where: { id: parseInt(id) }
+                where: { id: instanceId }
             });
         });
+
+        if (existingInstance) {
+            await cacheInvalidation.invalidateCourseCache(existingInstance.id, existingInstance.teacher_id).catch(() => {});
+            await cacheInvalidation.invalidateTeacherCache(existingInstance.teacher_id).catch(() => {});
+        }
+        await cacheInvalidation.invalidateSearchCache();
 
         res.json({ message: 'Course instance deleted successfully' });
     } catch (error) {
@@ -1106,6 +1146,10 @@ export const createChapter = async (req, res) => {
             }
         });
 
+        await cacheInvalidation.invalidateCourseCache(chapter.course_instance_id, chapter.course_instance.teacher_id).catch(() => {});
+        await cacheInvalidation.invalidateTeacherCache(chapter.course_instance.teacher_id).catch(() => {});
+        await cacheInvalidation.invalidateSearchCache();
+
         res.status(201).json({ message: 'Chapter created successfully', chapter });
     } catch (error) {
         console.error('Create chapter error:', error);
@@ -1154,6 +1198,10 @@ export const updateChapter = async (req, res) => {
             }
         });
 
+        await cacheInvalidation.invalidateCourseCache(chapter.course_instance_id, chapter.course_instance.teacher_id).catch(() => {});
+        await cacheInvalidation.invalidateTeacherCache(chapter.course_instance.teacher_id).catch(() => {});
+        await cacheInvalidation.invalidateSearchCache();
+
         res.json({ message: 'Chapter updated successfully', chapter });
     } catch (error) {
         console.error('Update chapter error:', error);
@@ -1165,12 +1213,21 @@ export const updateChapter = async (req, res) => {
 export const deleteChapter = async (req, res) => {
     try {
         const { id } = req.params;
+        const chapterId = parseInt(id);
+        const existingChapter = await prisma.chapter.findUnique({
+            where: { id: chapterId },
+            select: {
+                id: true,
+                course_instance_id: true,
+                course_instance: { select: { teacher_id: true } }
+            }
+        });
 
         // Delete in transaction to maintain referential integrity
         await prisma.$transaction(async (tx) => {
             // Delete watch history for lectures in this chapter
             const lectures = await tx.lecture.findMany({
-                where: { chapter_id: parseInt(id) }
+                where: { chapter_id: chapterId }
             });
 
             for (const lecture of lectures) {
@@ -1186,14 +1243,23 @@ export const deleteChapter = async (req, res) => {
 
             // Delete lectures in this chapter
             await tx.lecture.deleteMany({
-                where: { chapter_id: parseInt(id) }
+                where: { chapter_id: chapterId }
             });
 
             // Delete the chapter
             await tx.chapter.delete({
-                where: { id: parseInt(id) }
+                where: { id: chapterId }
             });
         });
+
+        if (existingChapter) {
+            const teacherId = existingChapter.course_instance?.teacher_id;
+            await cacheInvalidation.invalidateCourseCache(existingChapter.course_instance_id, teacherId).catch(() => {});
+            if (teacherId) {
+                await cacheInvalidation.invalidateTeacherCache(teacherId).catch(() => {});
+            }
+        }
+        await cacheInvalidation.invalidateSearchCache();
 
         res.json({ message: 'Chapter deleted successfully' });
     } catch (error) {
@@ -1259,6 +1325,16 @@ export const reorderChapters = async (req, res) => {
                 });
             }
         });
+
+        const updatedInstance = await prisma.courseInstance.findUnique({
+            where: { id: parseInt(courseInstanceId) },
+            select: { id: true, teacher_id: true }
+        });
+        if (updatedInstance) {
+            await cacheInvalidation.invalidateCourseCache(updatedInstance.id, updatedInstance.teacher_id).catch(() => {});
+            await cacheInvalidation.invalidateTeacherCache(updatedInstance.teacher_id).catch(() => {});
+        }
+        await cacheInvalidation.invalidateSearchCache();
 
         res.json({ message: 'Chapters reordered successfully' });
     } catch (error) {
@@ -1574,6 +1650,16 @@ export const createLecture = async (req, res) => {
             });
         });
 
+        const teacherId = result?.chapter?.course_instance?.teacher_id;
+        const courseInstanceId = result?.chapter?.course_instance_id;
+        if (courseInstanceId) {
+            await cacheInvalidation.invalidateCourseCache(courseInstanceId, teacherId).catch(() => {});
+        }
+        if (teacherId) {
+            await cacheInvalidation.invalidateTeacherCache(teacherId).catch(() => {});
+        }
+        await cacheInvalidation.invalidateSearchCache();
+
         res.status(201).json({ 
             message: 'Lecture created successfully', 
             lecture: result,
@@ -1615,6 +1701,22 @@ export const updateLecture = async (req, res) => {
             }
         });
 
+        const chapterData = await prisma.chapter.findUnique({
+            where: { id: lecture.chapter_id },
+            select: {
+                course_instance_id: true,
+                course_instance: { select: { teacher_id: true } }
+            }
+        });
+        const teacherId = chapterData?.course_instance?.teacher_id;
+        if (chapterData?.course_instance_id) {
+            await cacheInvalidation.invalidateCourseCache(chapterData.course_instance_id, teacherId).catch(() => {});
+        }
+        if (teacherId) {
+            await cacheInvalidation.invalidateTeacherCache(teacherId).catch(() => {});
+        }
+        await cacheInvalidation.invalidateSearchCache();
+
         res.json({ message: 'Lecture updated successfully', lecture });
     } catch (error) {
         console.error('Update lecture error:', error);
@@ -1625,24 +1727,48 @@ export const updateLecture = async (req, res) => {
 export const deleteLecture = async (req, res) => {
     try {
         const { id } = req.params;
+        const lectureId = parseInt(id);
+        const existingLecture = await prisma.lecture.findUnique({
+            where: { id: lectureId },
+            select: {
+                id: true,
+                chapter_id: true,
+                chapter: {
+                    select: {
+                        course_instance_id: true,
+                        course_instance: { select: { teacher_id: true } }
+                    }
+                }
+            }
+        });
 
         // Delete in transaction to maintain referential integrity
         await prisma.$transaction(async (tx) => {
             // Delete watch history for this lecture
             await tx.watchHistory.deleteMany({
-                where: { lecture_id: parseInt(id) }
+                where: { lecture_id: lectureId }
             });
 
             // Delete lecture tags
             await tx.lectureTag.deleteMany({
-                where: { lecture_id: parseInt(id) }
+                where: { lecture_id: lectureId }
             });
 
             // Delete lecture
             await tx.lecture.delete({
-                where: { id: parseInt(id) }
+                where: { id: lectureId }
             });
         });
+
+        const courseInstanceId = existingLecture?.chapter?.course_instance_id;
+        const teacherId = existingLecture?.chapter?.course_instance?.teacher_id;
+        if (courseInstanceId) {
+            await cacheInvalidation.invalidateCourseCache(courseInstanceId, teacherId).catch(() => {});
+        }
+        if (teacherId) {
+            await cacheInvalidation.invalidateTeacherCache(teacherId).catch(() => {});
+        }
+        await cacheInvalidation.invalidateSearchCache();
 
         res.json({ message: 'Lecture deleted successfully' });
     } catch (error) {
@@ -1690,6 +1816,22 @@ export const reorderLectures = async (req, res) => {
                 });
             }
         });
+
+        const chapter = await prisma.chapter.findUnique({
+            where: { id: parseInt(chapterId) },
+            select: {
+                course_instance_id: true,
+                course_instance: { select: { teacher_id: true } }
+            }
+        });
+        const teacherId = chapter?.course_instance?.teacher_id;
+        if (chapter?.course_instance_id) {
+            await cacheInvalidation.invalidateCourseCache(chapter.course_instance_id, teacherId).catch(() => {});
+        }
+        if (teacherId) {
+            await cacheInvalidation.invalidateTeacherCache(teacherId).catch(() => {});
+        }
+        await cacheInvalidation.invalidateSearchCache();
 
         res.json({ message: 'Lectures reordered successfully' });
     } catch (error) {
@@ -1794,6 +1936,19 @@ export const addLectureTags = async (req, res) => {
             }
         });
 
+        const chapter = await prisma.chapter.findUnique({
+            where: { id: updatedLecture.chapter_id },
+            select: {
+                course_instance_id: true,
+                course_instance: { select: { teacher_id: true } }
+            }
+        });
+        const teacherId = chapter?.course_instance?.teacher_id;
+        if (chapter?.course_instance_id) {
+            await cacheInvalidation.invalidateCourseCache(chapter.course_instance_id, teacherId).catch(() => {});
+        }
+        await cacheInvalidation.invalidateSearchCache();
+
         res.json({ 
             message: 'Tags added successfully', 
             lecture: updatedLecture 
@@ -1824,6 +1979,24 @@ export const removeLectureTag = async (req, res) => {
         await prisma.lectureTag.delete({
             where: { id: parseInt(tagId) }
         });
+
+        const lecture = await prisma.lecture.findUnique({
+            where: { id: parseInt(id) },
+            select: {
+                chapter: {
+                    select: {
+                        course_instance_id: true,
+                        course_instance: { select: { teacher_id: true } }
+                    }
+                }
+            }
+        });
+        const courseInstanceId = lecture?.chapter?.course_instance_id;
+        const teacherId = lecture?.chapter?.course_instance?.teacher_id;
+        if (courseInstanceId) {
+            await cacheInvalidation.invalidateCourseCache(courseInstanceId, teacherId).catch(() => {});
+        }
+        await cacheInvalidation.invalidateSearchCache();
 
         res.json({ message: 'Tag removed successfully' });
     } catch (error) {
@@ -2021,6 +2194,16 @@ export const updateLectureWithTags = async (req, res) => {
             }
         });
 
+        const teacherId = updatedLecture?.chapter?.course_instance?.teacher_id;
+        const courseInstanceId = updatedLecture?.chapter?.course_instance_id;
+        if (courseInstanceId) {
+            await cacheInvalidation.invalidateCourseCache(courseInstanceId, teacherId).catch(() => {});
+        }
+        if (teacherId) {
+            await cacheInvalidation.invalidateTeacherCache(teacherId).catch(() => {});
+        }
+        await cacheInvalidation.invalidateSearchCache();
+
         res.json({ 
             message: 'Lecture updated successfully', 
             lecture: updatedLecture 
@@ -2170,6 +2353,10 @@ export const bulkImportLectures = async (req, res) => {
                 });
             }
         }
+
+        await cacheInvalidation.invalidateCourseCache(courseInstance.id, courseInstance.teacher_id).catch(() => {});
+        await cacheInvalidation.invalidateTeacherCache(courseInstance.teacher_id).catch(() => {});
+        await cacheInvalidation.invalidateSearchCache();
 
         res.json({
             success: true,

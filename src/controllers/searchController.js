@@ -20,7 +20,7 @@ export const advancedSearch = async (req, res) => {
         console.log('Advanced search request:', { query, type, page, limit, filters, sortBy, sortOrder });
 
         // Create cache key based on search parameters
-        const cacheKey = `search:${type}:${query}:${page}:${limit}:${JSON.stringify(filters)}:${sortBy}:${sortOrder}`;
+        const cacheKey = `search:v2:${type}:${query}:${page}:${limit}:${JSON.stringify(filters)}:${sortBy}:${sortOrder}`;
         
         // Try to get cached results first
         const cachedResults = await redisHelpers.getCache(cacheKey);
@@ -160,7 +160,7 @@ const searchTeachers = async (query, filters, offset, limit, sortBy, sortOrder) 
                 u.name,
                 u.email,
                 u.created_at,
-                COUNT(ci.id) as course_count,
+                COUNT(DISTINCT ci.id) as course_count,
                 COUNT(DISTINCT e.id) as total_students,
                 ${query ? `ts_rank(to_tsvector('english', u.name || ' ' || u.email), to_tsquery('english', $1)) as relevance_score` : '0 as relevance_score'}
             FROM teachers t
