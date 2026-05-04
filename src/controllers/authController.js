@@ -42,9 +42,13 @@ export const login = async (req, res) => {
             { expiresIn: '30d' }
         );
 
+        const isSecureCookie = req.secure || req.headers['x-forwarded-proto'] === 'https';
+
         res.cookie('refreshToken', refreshToken, {
             httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
+            secure: isSecureCookie,
+            sameSite: 'lax',
+            path: '/',
             maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
         });
 
@@ -138,8 +142,20 @@ export const logout = async (req, res) => {
         await redisHelpers.clearViewingMode(actorUserId.toString());
     }
 
-    res.clearCookie('refreshToken');
-    res.clearCookie('accessToken');
+    const isSecureCookie = req.secure || req.headers['x-forwarded-proto'] === 'https';
+
+    res.clearCookie('refreshToken', {
+        httpOnly: true,
+        secure: isSecureCookie,
+        sameSite: 'lax',
+        path: '/'
+    });
+    res.clearCookie('accessToken', {
+        httpOnly: true,
+        secure: isSecureCookie,
+        sameSite: 'lax',
+        path: '/'
+    });
     res.json({ message: 'Logout successful' });
 };
 
