@@ -87,13 +87,20 @@ export const login = async (req, res) => {
 };
 
 export const refreshToken = (req, res) => {
-    const refreshToken = req.cookies.refreshToken;
+    const cookieHeader = req.headers?.cookie || '';
+    const parsedRefreshToken =
+        req.cookies?.refreshToken ||
+        cookieHeader
+            .split(';')
+            .map((part) => part.trim())
+            .find((part) => part.startsWith('refreshToken='))
+            ?.split('=')[1];
 
-    if (!refreshToken) {
+    if (!parsedRefreshToken) {
         return res.status(401).json({ message: 'Refresh token not found' });
     }
 
-    jwt.verify(refreshToken, REFRESH_SECRET_KEY, (err, user) => {
+    jwt.verify(parsedRefreshToken, REFRESH_SECRET_KEY, (err, user) => {
         if (err) {
             return res.status(403).json({ message: 'Invalid refresh token' });
         }
