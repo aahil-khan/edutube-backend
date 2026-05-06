@@ -1,7 +1,9 @@
 import express from 'express';
 import dotenv from 'dotenv';
+import os from 'os';
 import corsMiddleware from './middleware/cors.js';
 import { globalErrorHandler } from './utils/errorHandler.js';
+import { metricsHandler, metricsMiddleware } from './utils/metrics.js';
 
 // Initialize Redis connection
 import './config/redis.js';
@@ -27,6 +29,7 @@ const app = express();
 app.use(express.static("public"));
 app.use(express.json());
 app.use(corsMiddleware);
+app.use(metricsMiddleware);
 
 // Routes
 app.get("/", (req, res) => {
@@ -38,9 +41,12 @@ app.get("/health", (req, res) => {
   res.json({
     status: "healthy",
     timestamp: new Date().toISOString(),
-    message: "EduTube backend is running"
+    message: "EduTube backend is running",
+    instance: process.env.INSTANCE_ID || process.env.HOSTNAME || os.hostname(),
   });
 });
+
+app.get('/metrics', metricsHandler);
 
 // API Routes
 app.use('/api/auth', authRoutes);
