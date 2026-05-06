@@ -38,6 +38,7 @@ model Teacher {
   // Relations
   user             User             @relation(fields: [user_id], references: [id], onDelete: Cascade)
   course_instances CourseInstance[] // One-to-many: Teacher creates multiple course instances
+  course_requests  CourseRequest[]  // One-to-many: Requests submitted by the teacher
   
   @@map("teachers")
 }
@@ -70,6 +71,8 @@ model CourseInstance {
   teacher         Teacher        @relation(fields: [teacher_id], references: [id], onDelete: Cascade)
   chapters        Chapter[]      // Each instance has its own chapters
   enrollments     Enrollment[]   // Students enroll in specific instances
+  target_requests CourseRequest[] @relation("TargetInstance")
+  linked_requests CourseRequest[] @relation("LinkedInstance")
 
   // Ensure one teacher can't have duplicate instances of same course
   @@unique([course_template_id, teacher_id])
@@ -175,4 +178,26 @@ model WatchHistory {
   
   @@unique([user_id, lecture_id]) // One watch record per user per lecture
   @@map("watch_history")
+}
+
+model CourseRequest {
+  id                        Int             @id @default(autoincrement())
+  teacher_id                Int
+  request_type              String          @default("NEW_COURSE") // "NEW_COURSE" | "NEW_CONTENT"
+  course_name               String?         // Required for NEW_COURSE
+  course_code               String?         // Optional for NEW_COURSE
+  description               String?         // Description or message to admin
+  resource_links            Json            // Array of { url, type, label }
+  status                    String          @default("pending") // "pending" | "approved" | "rejected"
+  admin_notes               String?
+  target_course_instance_id Int?            // Set for NEW_CONTENT
+  linked_instance_id        Int?            // Set by admin when NEW_COURSE is linked
+  created_at                DateTime        @default(now())
+  updated_at                DateTime        @updatedAt
+
+  teacher                   Teacher         @relation(fields: [teacher_id], references: [id], onDelete: Cascade)
+  target_course_instance    CourseInstance? @relation("TargetInstance", fields: [target_course_instance_id], references: [id], onDelete: SetNull)
+  linked_instance           CourseInstance? @relation("LinkedInstance", fields: [linked_instance_id], references: [id], onDelete: SetNull)
+
+  @@map("course_requests")
 }

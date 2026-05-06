@@ -42,6 +42,7 @@ import {
     bulkImportLectures
 } from '../controllers/adminController.js';
 import { mintCliApiKey, listCliApiKeys, revokeCliApiKey } from '../controllers/cliApiKeyAdminController.js';
+import { getAllRequests, getRequestById, updateRequestStatus } from '../controllers/courseRequestController.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { requireAdmin } from '../middleware/adminAuth.js';
 
@@ -117,5 +118,10 @@ router.post('/youtube/bulk-import-lectures', bulkImportLectures);
 router.post('/cli-api-keys', mintCliApiKey);
 router.get('/cli-api-keys', listCliApiKeys);
 router.post('/cli-api-keys/:id/revoke', revokeCliApiKey);
+
+// Course Requests
+router.get('/course-requests', getAllRequests);
+router.get('/course-requests/:id', getRequestById);
+router.put('/course-requests/:id/status', updateRequestStatus);
 
 export default router;

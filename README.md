@@ -22,40 +22,6 @@ This is the refactored version of the EduTube backend, implementing modern Node.
 ```
 backend/
 ├── prisma/
-│   ├── schema.prisma          # Prisma schema definition
-│   └── migrations/            # Database migrations
-├── src/
-│   ├── config/
-│   │   ├── db.js             # Prisma client configuration
-│   │   ├── elasticsearch.js   # Elasticsearch client
-│   │   └── redis.js          # Redis configuration
-│   ├── controllers/
-│   │   ├── authController.js
-│   │   ├── userController.js
-│   │   ├── courseController.js
-│   │   ├── enrollmentController.js
-│   │   ├── searchController.js
-│   │   └── watchHistoryController.js
-│   ├── middleware/
-│   │   ├── auth.js           # Authentication middleware
-│   │   └── cors.js           # CORS configuration
-│   ├── routes/
-│   │   ├── authRoutes.js
-│   │   ├── userRoutes.js
-│   │   ├── courseRoutes.js
-│   │   ├── enrollmentRoutes.js
-│   │   ├── searchRoutes.js
-│   │   └── watchHistoryRoutes.js
-│   ├── utils/
-│   │   └── errorHandler.js   # Global error handling
-│   └── app.js               # Express app configuration
-├── index.js                 # Server entry point
-├── package.json
-└── .env.example            # Environment variables template
-```
-
-## 🔧 Setup Instructions
-
 1. **Install dependencies:**
    ```bash
    npm install
@@ -102,6 +68,29 @@ backend/
 - Introspection capabilities
 - Better error handling
 
+### 3. **Error Handling**
+- Centralized error handling middleware
+- Custom error classes
+- Development vs production error responses
+- Async error handling wrapper
+
+### 4. **Modular Architecture**
+- Easy to test individual components
+- Better code organization
+- Easier to maintain and scale
+- Clear dependency structure
+
+### 5. **Security Improvements**
+- Environment variables for sensitive data
+- Proper CORS configuration
+- JWT token handling
+- Input validation (can be extended)
+
+### 6. **Environment-Driven CORS**
+- Browser origins are controlled by `CORS_ORIGINS`
+- Default allowlist covers localhost, the LAN server IP, and `edutube.college.local`
+- Supports direct browser access to the backend only when needed
+## 🔄 Migration from Old Structure
 ### 3. **Error Handling**
 - Centralized error handling middleware
 - Custom error classes
